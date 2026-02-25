@@ -598,6 +598,105 @@ function validateImportPayload(payload) {
   return null;
 }
 
+function getCommittedEdges(edges, nodeById) {
+  return edges.filter((edge) => {
+    if (!edge || edge.stage !== "committed") {
+      return false;
+    }
+
+    const fromNode = nodeById.get(edge.from);
+    const toNode = nodeById.get(edge.to);
+    return (
+      fromNode &&
+      toNode &&
+      normalizeStatus(fromNode) === "committed" &&
+      normalizeStatus(toNode) === "committed"
+    );
+  });
+}
+
+function validateCommittedGraphIntegrity(nodes, edges) {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const committedNodes = nodes.filter((node) => normalizeStatus(node) === "committed");
+  const committedEdges = getCommittedEdges(edges, nodeById);
+
+  const connectedCommittedNodeIds = new Set();
+  for (const edge of committedEdges) {
+    connectedCommittedNodeIds.add(edge.from);
+    connectedCommittedNodeIds.add(edge.to);
+  }
+
+  const orphanCommittedNodes = committedNodes.filter(
+    (node) => !connectedCommittedNodeIds.has(node.id)
+  );
+  if (committedNodes.length > 1 && orphanCommittedNodes.length > 0) {
+    const orphanTitles = orphanCommittedNodes.map((node) => node.title).join(", ");
+    return `Committed nodes cannot be orphaned. Missing committed edge connection: ${orphanTitles}.`;
+  }
+
+  for (const node of committedNodes) {
+    if (node.type !== "Requirement") {
+      continue;
+    }
+
+    const outgoingDecisionEdges = committedEdges.filter((edge) => {
+      if (edge.from !== node.id) {
+        return false;
+      }
+
+      const target = nodeById.get(edge.to);
+      return target?.type === "Decision";
+    });
+
+    if (outgoingDecisionEdges.length !== 1) {
+      return `Requirement "${node.title}" must link to exactly one Decision before commit/import.`;
+    }
+  }
+
+  return null;
+}
+
+function validateCommittedEdgeVersioningOnImport(incomingEdges, existingEdges) {
+  const existingCommittedById = new Map(
+    existingEdges
+      .filter((edge) => edge && edge.stage === "committed" && typeof edge.id === "string")
+      .map((edge) => [edge.id, edge])
+  );
+  const incomingIds = new Set(
+    incomingEdges
+      .filter((edge) => edge && typeof edge.id === "string")
+      .map((edge) => edge.id)
+  );
+
+  for (const existingCommitted of existingCommittedById.values()) {
+    if (!incomingIds.has(existingCommitted.id)) {
+      return "Import cannot remove committed edges. Add a new versioned edge instead.";
+    }
+  }
+
+  for (const incoming of incomingEdges) {
+    if (!incoming || typeof incoming.id !== "string") {
+      continue;
+    }
+
+    const existingCommitted = existingCommittedById.get(incoming.id);
+    if (!existingCommitted) {
+      continue;
+    }
+
+    const changed =
+      incoming.from !== existingCommitted.from ||
+      incoming.to !== existingCommitted.to ||
+      incoming.relationshipType !== existingCommitted.relationshipType;
+
+    if (changed) {
+      return "Committed edge changes must be added as a new versioned edge, not edited in place.";
+    }
+  }
+
+  return null;
+}
+
 export default function NodesDraftClient() {
   const initialNodes = loadDraftNodes();
   const initialEdges = loadDraftEdges(initialNodes);
@@ -803,8 +902,19 @@ export default function NodesDraftClient() {
       setCommitError(commitValidationError);
       return;
     }
+    const nextNodes = draftNodes.map((node) =>
+      node.id === selectedNode.id
+        ? { ...node, status: "committed", stage: "committed" }
+        : node
+    );
+    const nextEdges = syncEdges(nextNodes, draftEdges);
+    const graphValidationError = validateCommittedGraphIntegrity(nextNodes, nextEdges);
+    if (graphValidationError) {
+      setCommitError(graphValidationError);
+      return;
+    }
 
-    updateSelectedNode({ status: "committed", stage: "committed" });
+    saveDraftState(nextNodes, nextEdges);
     appendAuditEntry({
       timestamp: new Date().toISOString(),
       action: "NODE_COMMITTED",
@@ -1021,10 +1131,28 @@ export default function NodesDraftClient() {
         .map((edge) => normalizeEdge(edge, nodesById))
         .filter((edge) => edge !== null);
 
+      const edgeVersioningError = validateCommittedEdgeVersioningOnImport(
+        normalizedEdges,
+        draftEdges
+      );
+      if (edgeVersioningError) {
+        setBundleMessage(`Import failed: ${edgeVersioningError}`);
+        return;
+      }
+
       const nodesWithEdges = applyEdgesToNodes(normalizedNodes, normalizedEdges);
       const importValidationError = validateImportPayload(nodesWithEdges);
       if (importValidationError) {
         setBundleMessage(`Import failed: ${importValidationError}`);
+        return;
+      }
+
+      const committedGraphError = validateCommittedGraphIntegrity(
+        nodesWithEdges,
+        normalizedEdges
+      );
+      if (committedGraphError) {
+        setBundleMessage(`Import failed: ${committedGraphError}`);
         return;
       }
 
