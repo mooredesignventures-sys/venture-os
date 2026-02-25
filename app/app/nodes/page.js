@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import ExitButton from "./exit-button";
+import NodesDraftClient from "./nodes-draft-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function AppPage() {
+export default async function NodesPage() {
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
 
@@ -15,14 +15,12 @@ export default async function AppPage() {
 
   return (
     <main>
-      <h1>App area (placeholder)</h1>
-      <p>
-        <Link href="/app/nodes">Nodes (Draft)</Link>
-      </p>
-      <ExitButton />
+      <h1>Nodes (Draft)</h1>
+      <p>{"Draft only \u2014 DB will come after Master Spec"}</p>
+      <NodesDraftClient />
       <nav>
         <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
-        <Link href="/login">Login</Link>
+        <Link href="/app/nodes">Nodes (Draft)</Link>
       </nav>
     </main>
   );
