@@ -227,11 +227,7 @@ function loadDraftNodes() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      const seededDemoNodes = DEMO_NODES.map((node) => normalizeNode(node)).filter(
-        (node) => node !== null
-      );
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seededDemoNodes));
-      return seededDemoNodes;
+      return [];
     }
 
     const parsed = JSON.parse(raw);
