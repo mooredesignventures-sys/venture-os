@@ -3,10 +3,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import ViewClientLoader from "../view-client-loader";
 import AppNav from "../../../../src/components/app-nav";
+import ViewScopeToggle from "../view-scope-toggle";
 
 export const dynamic = "force-dynamic";
 
-export default async function RequirementsViewPage() {
+export default async function RequirementsViewPage({ searchParams }) {
+  const resolvedSearchParams = await searchParams;
+  const scope = resolvedSearchParams?.scope === "committed" ? "committed" : "draft";
+  const scopeQuery = scope === "committed" ? "?scope=committed" : "";
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
 
@@ -19,9 +23,11 @@ export default async function RequirementsViewPage() {
       <h1>Requirements Tree (Draft)</h1>
       <p>Requirement nodes with related draft items.</p>
       <AppNav current="/app/views" />
-      <ViewClientLoader mode="requirements" />
+      <ViewScopeToggle basePath="/app/views/requirements" scope={scope} />
+      <ViewClientLoader mode="requirements" viewScope={scope} />
       <nav>
-        <Link href="/app/views">Views</Link> | <Link href="/app/nodes">Nodes</Link>
+        <Link href={`/app/views${scopeQuery}`}>Views</Link> |{" "}
+        <Link href="/app/nodes">Nodes</Link>
       </nav>
     </main>
   );

@@ -6,6 +6,7 @@ import SearchBox from "../../../src/components/ui/search-box";
 import SelectFilter from "../../../src/components/ui/select-filter";
 
 const STORAGE_KEY = "draft_nodes";
+const EDGE_STORAGE_KEY = "draft_edges";
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 
 function normalizeRelationships(node) {
@@ -29,8 +30,16 @@ function normalizeRelationships(node) {
 }
 
 function normalizeStatus(node) {
+  if (node.stage === "committed") {
+    return "committed";
+  }
+
   if (node.stage === "archived") {
     return "archived";
+  }
+
+  if (node.status === "committed") {
+    return "committed";
   }
 
   if (node.status === "archived") {
@@ -42,6 +51,24 @@ function normalizeStatus(node) {
   }
 
   return "active";
+}
+
+function loadDraftEdges() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(EDGE_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function loadDraftNodes() {
@@ -78,22 +105,38 @@ function getActiveNodes(nodes) {
     }));
 }
 
-export default function ViewsClient({ mode }) {
-  const [search, setSearch] = useState("");
-  const [relationshipTypeFilter, setRelationshipTypeFilter] = useState("all");
-  const activeNodes = getActiveNodes(loadDraftNodes());
+function buildRelationships(nodes, edges) {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
 
-  const nodeById = useMemo(
-    () => new Map(activeNodes.map((node) => [node.id, node])),
-    [activeNodes]
-  );
+  if (edges.length > 0) {
+    return edges
+      .filter(
+        (edge) =>
+          edge &&
+          typeof edge.from === "string" &&
+          typeof edge.to === "string" &&
+          RELATIONSHIP_TYPES.includes(edge.relationshipType) &&
+          edge.stage !== "archived"
+      )
+      .map((edge) => {
+        const source = nodeById.get(edge.from);
+        const target = nodeById.get(edge.to);
+        if (!source || !target) {
+          return null;
+        }
 
-  const decisionNodes = activeNodes.filter((node) => node.type === "Decision");
-  const requirementNodes = activeNodes.filter(
-    (node) => node.type === "Requirement"
-  );
+        return {
+          sourceId: source.id,
+          sourceTitle: source.title,
+          targetId: target.id,
+          targetTitle: target.title,
+          type: edge.relationshipType,
+        };
+      })
+      .filter((item) => item !== null);
+  }
 
-  const relationships = activeNodes.flatMap((node) =>
+  return nodes.flatMap((node) =>
     node.relationships
       .map((rel) => {
         const relatedNode = nodeById.get(rel.targetId);
@@ -111,6 +154,43 @@ export default function ViewsClient({ mode }) {
       })
       .filter((item) => item !== null)
   );
+}
+
+export default function ViewsClient({ mode, viewScope = "draft" }) {
+  const [search, setSearch] = useState("");
+  const [relationshipTypeFilter, setRelationshipTypeFilter] = useState("all");
+  const activeNodes = getActiveNodes(loadDraftNodes());
+  const activeEdges = loadDraftEdges();
+  const filteredNodes =
+    viewScope === "committed"
+      ? activeNodes.filter((node) => normalizeStatus(node) === "committed")
+      : activeNodes;
+
+  const nodeById = useMemo(
+    () => new Map(filteredNodes.map((node) => [node.id, node])),
+    [filteredNodes]
+  );
+
+  const decisionNodes = filteredNodes.filter((node) => node.type === "Decision");
+  const requirementNodes = filteredNodes.filter(
+    (node) => node.type === "Requirement"
+  );
+
+  const relationships = buildRelationships(filteredNodes, activeEdges);
+
+  const relationshipsBySource = useMemo(() => {
+    const grouped = new Map();
+
+    for (const relationship of relationships) {
+      if (!grouped.has(relationship.sourceId)) {
+        grouped.set(relationship.sourceId, []);
+      }
+
+      grouped.get(relationship.sourceId).push(relationship);
+    }
+
+    return grouped;
+  }, [relationships]);
 
   const filteredRelationships = relationships.filter((item) => {
     const term = search.trim().toLowerCase();
@@ -138,9 +218,7 @@ export default function ViewsClient({ mode }) {
     return (
       <ul>
         {nodes.map((node) => {
-          const related = node.relationships
-            .map((rel) => ({ ...rel, node: nodeById.get(rel.targetId) }))
-            .filter((item) => Boolean(item.node));
+          const related = relationshipsBySource.get(node.id) || [];
 
           return (
             <li key={node.id}>
@@ -149,11 +227,18 @@ export default function ViewsClient({ mode }) {
                 <p>No related items</p>
               ) : (
                 <ul>
-                  {related.map((item, index) => (
-                    <li key={`${node.id}-${item.targetId}-${item.type}-${index}`}>
-                      {item.type}: {item.node.title} ({item.node.type})
-                    </li>
-                  ))}
+                  {related.map((item, index) => {
+                    const targetNode = nodeById.get(item.targetId);
+                    if (!targetNode) {
+                      return null;
+                    }
+
+                    return (
+                      <li key={`${node.id}-${item.targetId}-${item.type}-${index}`}>
+                        {item.type}: {targetNode.title} ({targetNode.type})
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </li>
