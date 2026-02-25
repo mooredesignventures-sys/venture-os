@@ -39,7 +39,8 @@ export default function AuditClient() {
     <ul>
       {ordered.map((entry, index) => (
         <li key={`${entry.timestamp}-${entry.nodeId}-${index}`}>
-          {entry.timestamp} | {entry.action} | {entry.nodeId} | {entry.nodeTitle}
+          {entry.timestamp} | {entry.action} | {entry.nodeId} | {entry.nodeTitle} |{" "}
+          {entry.actor || "unknown"}
         </li>
       ))}
     </ul>
