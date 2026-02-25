@@ -11,6 +11,7 @@ const AUDIT_STORAGE_KEY = "draft_audit_log";
 const APP_VERSION = "local-draft-v1";
 const CURRENT_BUNDLE_SCHEMA_VERSION = "2";
 const AUDIT_ACTOR = "founder";
+const COMMIT_CONFIRM_TEXT = "CONFIRMED";
 const ALLOWED_TYPES = [
   "Decision",
   "Requirement",
@@ -254,15 +255,53 @@ function loadAuditEntries() {
     }
 
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed)
+      ? parsed.map((entry) => normalizeAuditEvent(entry)).filter((entry) => entry !== null)
+      : [];
   } catch {
     return [];
   }
 }
 
+function normalizeAuditEvent(rawEvent) {
+  if (!rawEvent || typeof rawEvent !== "object") {
+    return null;
+  }
+
+  const timestamp =
+    typeof rawEvent.timestamp === "string" && rawEvent.timestamp
+      ? rawEvent.timestamp
+      : new Date().toISOString();
+  const action =
+    typeof rawEvent.action === "string" && rawEvent.action
+      ? rawEvent.action
+      : typeof rawEvent.eventType === "string" && rawEvent.eventType
+        ? rawEvent.eventType
+        : "UNKNOWN_EVENT";
+  const eventType =
+    typeof rawEvent.eventType === "string" && rawEvent.eventType
+      ? rawEvent.eventType
+      : action;
+
+  return {
+    ...rawEvent,
+    timestamp,
+    action,
+    eventType,
+    actor:
+      typeof rawEvent.actor === "string" && rawEvent.actor ? rawEvent.actor : "unknown",
+    nodeId: typeof rawEvent.nodeId === "string" ? rawEvent.nodeId : undefined,
+    edgeId: typeof rawEvent.edgeId === "string" ? rawEvent.edgeId : undefined,
+  };
+}
+
 function appendAuditEntry(entry) {
   const currentEntries = loadAuditEntries();
-  const nextEntries = [...currentEntries, entry];
+  const normalizedEntry = normalizeAuditEvent(entry);
+  if (!normalizedEntry) {
+    return;
+  }
+  const nextEntries = [...currentEntries, normalizedEntry];
   window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(nextEntries));
 }
 
@@ -271,7 +310,10 @@ function clearAuditEntries() {
 }
 
 function saveAuditEntries(entries) {
-  window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(entries));
+  const normalizedEntries = entries
+    .map((entry) => normalizeAuditEvent(entry))
+    .filter((entry) => entry !== null);
+  window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(normalizedEntries));
 }
 
 function normalizeEdge(rawEdge, nodeById) {
@@ -515,12 +557,12 @@ function validateBundle(bundle) {
       !event ||
       typeof event !== "object" ||
       typeof event.timestamp !== "string" ||
-      typeof event.action !== "string" ||
+      (typeof event.action !== "string" && typeof event.eventType !== "string") ||
       (event.actor !== undefined && typeof event.actor !== "string")
   );
 
   if (invalidAuditEvent) {
-    return "Each audit event needs timestamp/action strings, and actor must be a string when present.";
+    return "Each audit event needs timestamp plus action/eventType strings, and actor must be a string when present.";
   }
 
   return null;
@@ -819,6 +861,23 @@ function buildBundlePreview(currentNodes, currentEdges, incomingNodes, incomingE
   };
 }
 
+function collectEdgeVersionCreations(existingEdges, incomingEdges) {
+  const latestExistingByPath = new Map();
+  for (const edge of existingEdges) {
+    const key = `${edge.from}|${edge.to}|${edge.relationshipType}`;
+    const previous = latestExistingByPath.get(key);
+    if (!previous || edge.version > previous.version) {
+      latestExistingByPath.set(key, edge);
+    }
+  }
+
+  return incomingEdges.filter((edge) => {
+    const key = `${edge.from}|${edge.to}|${edge.relationshipType}`;
+    const previous = latestExistingByPath.get(key);
+    return previous && edge.version > previous.version;
+  });
+}
+
 function simulateBundleImport(bundle, existingEdges) {
   const validationError = validateBundle(bundle);
   if (validationError) {
@@ -1094,7 +1153,7 @@ export default function NodesDraftClient() {
       return;
     }
 
-    if (commitConfirmText !== "CONFIRMED") {
+    if (commitConfirmText !== COMMIT_CONFIRM_TEXT) {
       setCommitError("Type CONFIRMED before committing.");
       return;
     }
@@ -1120,6 +1179,7 @@ export default function NodesDraftClient() {
     appendAuditEntry({
       timestamp: new Date().toISOString(),
       action: "NODE_COMMITTED",
+      eventType: "NODE_COMMITTED",
       nodeId: selectedNode.id,
       nodeTitle: selectedNode.title,
       actor: AUDIT_ACTOR,
@@ -1283,6 +1343,12 @@ export default function NodesDraftClient() {
     link.download = "venture-os-bundle.json";
     link.click();
     URL.revokeObjectURL(url);
+    appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      action: "BUNDLE_EXPORTED",
+      eventType: "BUNDLE_EXPORTED",
+      actor: AUDIT_ACTOR,
+    });
     setBundleMessage("Bundle exported.");
   }
 
@@ -1348,6 +1414,12 @@ export default function NodesDraftClient() {
 
       setDryRunDetails(details.slice(0, 5));
       setPreviewDiff(preview);
+      appendAuditEntry({
+        timestamp: new Date().toISOString(),
+        action: "BUNDLE_VALIDATED",
+        eventType: "BUNDLE_VALIDATED",
+        actor: AUDIT_ACTOR,
+      });
       setDryRunMessage("Valid bundle. Ready to import.");
     } catch {
       setDryRunMessage("Dry run failed: Bundle JSON is not valid JSON.");
@@ -1366,13 +1438,39 @@ export default function NodesDraftClient() {
         return;
       }
 
+      const versionCreations = collectEdgeVersionCreations(
+        draftEdges,
+        simulation.normalizedEdges
+      );
       saveDraftState(simulation.nodesWithEdges, simulation.normalizedEdges);
       saveAuditEntries(
         parsed.auditEvents.map((event) => ({
           ...event,
           actor: typeof event.actor === "string" ? event.actor : "unknown",
+          eventType:
+            typeof event.eventType === "string"
+              ? event.eventType
+              : typeof event.action === "string"
+                ? event.action
+                : "UNKNOWN_EVENT",
         }))
       );
+      for (const edge of versionCreations) {
+        appendAuditEntry({
+          timestamp: new Date().toISOString(),
+          action: "EDGE_VERSION_CREATED",
+          eventType: "EDGE_VERSION_CREATED",
+          actor: AUDIT_ACTOR,
+          edgeId: edge.id,
+          edgeRef: `${edge.from}->${edge.to}`,
+        });
+      }
+      appendAuditEntry({
+        timestamp: new Date().toISOString(),
+        action: "BUNDLE_IMPORTED",
+        eventType: "BUNDLE_IMPORTED",
+        actor: AUDIT_ACTOR,
+      });
       setSelectedId(null);
       setImportText("");
       setImportError("");
