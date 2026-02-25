@@ -19,6 +19,9 @@ export default async function AppPage() {
       <p>
         <Link href="/app/nodes">Nodes (Draft)</Link>
       </p>
+      <p>
+        <Link href="/app/views">Views (Draft)</Link>
+      </p>
       <ExitButton />
       <nav>
         <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
