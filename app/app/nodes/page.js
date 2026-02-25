@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import NodesDraftClient from "./nodes-draft-client";
+import NodesDraftClientLoader from "./nodes-draft-client-loader";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export default async function NodesPage() {
     <main>
       <h1>Nodes (Draft)</h1>
       <p>{"Draft only \u2014 DB will come after Master Spec"}</p>
-      <NodesDraftClient />
+      <NodesDraftClientLoader />
       <nav>
         <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
         <Link href="/app/nodes">Nodes (Draft)</Link>

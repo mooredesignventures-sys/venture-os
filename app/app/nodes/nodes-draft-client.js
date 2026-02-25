@@ -101,7 +101,7 @@ export default function NodesDraftClient() {
   const [draftNodes, setDraftNodes] = useState(loadDraftNodes);
   const [selectedId, setSelectedId] = useState(null);
   const [importText, setImportText] = useState("");
-  const [importMessage, setImportMessage] = useState("");
+  const [importError, setImportError] = useState("");
 
   const selectedNode = draftNodes.find((node) => node.id === selectedId) || null;
 
@@ -239,14 +239,14 @@ export default function NodesDraftClient() {
   }
 
   function handleImportJson() {
-    setImportMessage("");
+    setImportError("");
 
     try {
       const parsed = JSON.parse(importText);
       const validationError = validateImportPayload(parsed);
 
       if (validationError) {
-        setImportMessage(validationError);
+        setImportError(validationError);
         return;
       }
 
@@ -256,9 +256,9 @@ export default function NodesDraftClient() {
 
       saveDraftNodes(normalized);
       setSelectedId(null);
-      setImportMessage("Import successful.");
+      setImportError("");
     } catch {
-      setImportMessage("Invalid JSON.");
+      setImportError("Invalid JSON.");
     }
   }
 
@@ -309,7 +309,10 @@ export default function NodesDraftClient() {
       <textarea
         id="import-json"
         value={importText}
-        onChange={(event) => setImportText(event.target.value)}
+        onChange={(event) => {
+          setImportText(event.target.value);
+          setImportError("");
+        }}
         rows={6}
         cols={50}
       />
@@ -317,7 +320,7 @@ export default function NodesDraftClient() {
       <button type="button" onClick={handleImportJson}>
         Import JSON
       </button>
-      {importMessage ? <p>{importMessage}</p> : null}
+      {importError ? <p>{importError}</p> : null}
 
       <h2>Draft nodes</h2>
 
