@@ -4,9 +4,34 @@ import { useMemo, useState } from "react";
 
 const STORAGE_KEY = "draft_nodes";
 const ALLOWED_TYPES = ["Decision", "Requirement", "Other"];
+const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 
 function createNodeId() {
   return `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeRelationships(rawNode) {
+  const typedRelationships = Array.isArray(rawNode.relationships)
+    ? rawNode.relationships
+        .filter((item) => item && typeof item === "object")
+        .map((item) => ({
+          targetId: typeof item.targetId === "string" ? item.targetId : "",
+          type: RELATIONSHIP_TYPES.includes(item.type)
+            ? item.type
+            : "relates_to",
+        }))
+        .filter((item) => item.targetId)
+    : [];
+
+  if (typedRelationships.length > 0) {
+    return typedRelationships;
+  }
+
+  const relatedIds = Array.isArray(rawNode.relatedIds)
+    ? rawNode.relatedIds.filter((value) => typeof value === "string")
+    : [];
+
+  return relatedIds.map((targetId) => ({ targetId, type: "relates_to" }));
 }
 
 function normalizeNode(rawNode) {
@@ -31,12 +56,9 @@ function normalizeNode(rawNode) {
     : Date.now();
 
   const archived = Boolean(rawNode.archived);
+  const relationships = normalizeRelationships(rawNode);
 
-  const relatedIds = Array.isArray(rawNode.relatedIds)
-    ? rawNode.relatedIds.filter((value) => typeof value === "string")
-    : [];
-
-  return { id, title, type, createdAt, archived, relatedIds };
+  return { id, title, type, createdAt, archived, relationships };
 }
 
 function loadDraftNodes() {
@@ -81,6 +103,24 @@ function validateImportPayload(payload) {
       return "Each node type must be Decision, Requirement, or Other.";
     }
 
+    if (item.relationships !== undefined) {
+      if (!Array.isArray(item.relationships)) {
+        return "relationships must be an array when present.";
+      }
+
+      const invalidRelationship = item.relationships.some(
+        (rel) =>
+          !rel ||
+          typeof rel !== "object" ||
+          typeof rel.targetId !== "string" ||
+          !RELATIONSHIP_TYPES.includes(rel.type)
+      );
+
+      if (invalidRelationship) {
+        return "Each relationship needs targetId and a valid type.";
+      }
+    }
+
     if (
       item.relatedIds !== undefined &&
       (!Array.isArray(item.relatedIds) ||
@@ -102,8 +142,15 @@ export default function NodesDraftClient() {
   const [selectedId, setSelectedId] = useState(null);
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState("");
+  const [relationshipTargetId, setRelationshipTargetId] = useState("");
+  const [relationshipType, setRelationshipType] = useState("relates_to");
 
   const selectedNode = draftNodes.find((node) => node.id === selectedId) || null;
+
+  const nodeById = useMemo(
+    () => new Map(draftNodes.map((node) => [node.id, node])),
+    [draftNodes]
+  );
 
   const visibleNodes = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -150,7 +197,7 @@ export default function NodesDraftClient() {
       type,
       createdAt: Date.now(),
       archived: false,
-      relatedIds: [],
+      relationships: [],
     };
 
     const nextNodes = [...draftNodes, nextNode];
@@ -196,32 +243,53 @@ export default function NodesDraftClient() {
       .filter((node) => node.id !== removedId)
       .map((node) => ({
         ...node,
-        relatedIds: node.relatedIds.filter((relatedId) => relatedId !== removedId),
+        relationships: Array.isArray(node.relationships)
+          ? node.relationships.filter((rel) => rel.targetId !== removedId)
+          : [],
       }));
 
     saveDraftNodes(nextNodes);
     setSelectedId(null);
   }
 
-  function handleAddRelated(relatedId) {
-    if (!selectedNode || !relatedId) {
+  function handleAddRelationship() {
+    if (!selectedNode || !relationshipTargetId) {
       return;
     }
 
-    if (selectedNode.relatedIds.includes(relatedId)) {
+    const existing = Array.isArray(selectedNode.relationships)
+      ? selectedNode.relationships
+      : [];
+
+    const duplicate = existing.some(
+      (rel) =>
+        rel.targetId === relationshipTargetId && rel.type === relationshipType
+    );
+
+    if (duplicate) {
       return;
     }
 
-    updateSelectedNode({ relatedIds: [...selectedNode.relatedIds, relatedId] });
+    updateSelectedNode({
+      relationships: [
+        ...existing,
+        { targetId: relationshipTargetId, type: relationshipType },
+      ],
+    });
+
+    setRelationshipTargetId("");
+    setRelationshipType("relates_to");
   }
 
-  function handleRemoveRelated(relatedId) {
+  function handleRemoveRelationship(indexToRemove) {
     if (!selectedNode) {
       return;
     }
 
     updateSelectedNode({
-      relatedIds: selectedNode.relatedIds.filter((id) => id !== relatedId),
+      relationships: (selectedNode.relationships || []).filter(
+        (_, index) => index !== indexToRemove
+      ),
     });
   }
 
@@ -262,14 +330,14 @@ export default function NodesDraftClient() {
     }
   }
 
-  const relatedNodeOptions = draftNodes.filter(
+  const relationshipTargetOptions = draftNodes.filter(
     (node) => !node.archived && node.id !== selectedId
   );
 
-  const relatedNodes = selectedNode
-    ? selectedNode.relatedIds
-        .map((id) => draftNodes.find((node) => node.id === id))
-        .filter((node) => Boolean(node))
+  const selectedRelationships = selectedNode
+    ? Array.isArray(selectedNode.relationships)
+      ? selectedNode.relationships
+      : []
     : [];
 
   return (
@@ -395,41 +463,59 @@ export default function NodesDraftClient() {
             </button>
           </p>
 
-          <h3>Related nodes</h3>
-          {relatedNodes.length === 0 ? (
-            <p>No related nodes yet.</p>
+          <h3>Relationships</h3>
+          {selectedRelationships.length === 0 ? (
+            <p>No relationships yet.</p>
           ) : (
             <ul>
-              {relatedNodes.map((node) => (
-                <li key={node.id}>
-                  {node.title} ({node.type}){" "}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveRelated(node.id)}
-                  >
-                    Unlink
-                  </button>
-                </li>
-              ))}
+              {selectedRelationships.map((relationship, index) => {
+                const targetNode = nodeById.get(relationship.targetId);
+                if (!targetNode) {
+                  return null;
+                }
+
+                return (
+                  <li key={`${selectedNode.id}-${relationship.targetId}-${index}`}>
+                    {relationship.type}: {targetNode.title} ({targetNode.type}){" "}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRelationship(index)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
-          {relatedNodeOptions.length > 0 ? (
+          {relationshipTargetOptions.length > 0 ? (
             <p>
+              <label htmlFor="relationship-target">Add relationship</label>
+              <br />
               <select
-                defaultValue=""
-                onChange={(event) => {
-                  handleAddRelated(event.target.value);
-                  event.target.value = "";
-                }}
+                id="relationship-target"
+                value={relationshipTargetId}
+                onChange={(event) => setRelationshipTargetId(event.target.value)}
               >
-                <option value="">Link related node...</option>
-                {relatedNodeOptions.map((node) => (
+                <option value="">Select node...</option>
+                {relationshipTargetOptions.map((node) => (
                   <option key={node.id} value={node.id}>
                     {node.title} ({node.type})
                   </option>
                 ))}
-              </select>
+              </select>{" "}
+              <select
+                value={relationshipType}
+                onChange={(event) => setRelationshipType(event.target.value)}
+              >
+                <option value="depends_on">depends_on</option>
+                <option value="enables">enables</option>
+                <option value="relates_to">relates_to</option>
+              </select>{" "}
+              <button type="button" onClick={handleAddRelationship}>
+                Add relationship
+              </button>
             </p>
           ) : null}
         </div>
