@@ -25,6 +25,18 @@ function normalizeRelationships(node) {
   return [];
 }
 
+function normalizeStatus(node) {
+  if (node.status === "archived") {
+    return "archived";
+  }
+
+  if (node.archived) {
+    return "archived";
+  }
+
+  return "active";
+}
+
 function loadDraftNodes() {
   if (typeof window === "undefined") {
     return [];
@@ -51,7 +63,7 @@ function getActiveNodes(nodes) {
         typeof node.id === "string" &&
         typeof node.title === "string" &&
         typeof node.type === "string" &&
-        !node.archived
+        normalizeStatus(node) !== "archived"
     )
     .map((node) => ({
       ...node,
