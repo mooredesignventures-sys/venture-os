@@ -31,7 +31,7 @@ const DEMO_NODES = [
     id: "demo_decision_1",
     title: "Adopt Quarterly Planning Cycle",
     type: "Decision",
-    status: "committed",
+    status: "proposed",
     createdAt: 1704067200000,
     relationships: [
       { targetId: "demo_req_1", type: "depends_on" },
@@ -667,7 +667,7 @@ function validateImportPayload(payload) {
 
       const targetStage = normalizeStatus(target);
       if (nodeStage === "committed" && targetStage === "proposed") {
-        return "Committed nodes cannot link to proposed nodes.";
+        return `Committed node "${node.title}" (${node.id}) cannot link to proposed node "${target.title}" (${target.id}).`;
       }
     }
 
@@ -678,7 +678,7 @@ function validateImportPayload(payload) {
       });
 
       if (decisionLinks.length !== 1) {
-        return "Committed Requirement nodes must link to exactly one Decision.";
+        return `Committed Requirement "${node.title}" (${node.id}) must link to exactly one Decision. Found ${decisionLinks.length}.`;
       }
     }
   }
