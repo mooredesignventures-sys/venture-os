@@ -31,7 +31,7 @@ const DEMO_NODES = [
     id: "demo_decision_1",
     title: "Adopt Quarterly Planning Cycle",
     type: "Decision",
-    status: "committed",
+    status: "proposed",
     createdAt: 1704067200000,
     relationships: [
       { targetId: "demo_req_1", type: "depends_on" },
@@ -227,7 +227,11 @@ function loadDraftNodes() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return [];
+      const seededDemoNodes = DEMO_NODES.map((node) => normalizeNode(node)).filter(
+        (node) => node !== null
+      );
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seededDemoNodes));
+      return seededDemoNodes;
     }
 
     const parsed = JSON.parse(raw);
