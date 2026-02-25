@@ -743,6 +743,133 @@ function validateCommittedEdgeVersioningOnImport(incomingEdges, existingEdges) {
   return null;
 }
 
+function getNodePreviewLabel(node) {
+  return `${node.title} (${node.id})`;
+}
+
+function getEdgePreviewLabel(edge) {
+  return `${edge.from} -> ${edge.to} (${edge.relationshipType}) v${edge.version} [${edge.id}]`;
+}
+
+function hasNodeUpdate(current, incoming) {
+  return (
+    current.title !== incoming.title ||
+    current.type !== incoming.type ||
+    current.stage !== incoming.stage ||
+    current.status !== incoming.status ||
+    current.version !== incoming.version ||
+    current.createdBy !== incoming.createdBy
+  );
+}
+
+function hasEdgeUpdate(current, incoming) {
+  return (
+    current.from !== incoming.from ||
+    current.to !== incoming.to ||
+    current.relationshipType !== incoming.relationshipType ||
+    current.stage !== incoming.stage ||
+    current.version !== incoming.version
+  );
+}
+
+function buildBundlePreview(currentNodes, currentEdges, incomingNodes, incomingEdges) {
+  const currentNodeById = new Map(currentNodes.map((node) => [node.id, node]));
+  const incomingNodeById = new Map(incomingNodes.map((node) => [node.id, node]));
+
+  const currentEdgeById = new Map(currentEdges.map((edge) => [edge.id, edge]));
+  const incomingEdgeById = new Map(incomingEdges.map((edge) => [edge.id, edge]));
+
+  const addedNodes = incomingNodes
+    .filter((node) => !currentNodeById.has(node.id))
+    .map(getNodePreviewLabel);
+  const removedNodes = currentNodes
+    .filter((node) => !incomingNodeById.has(node.id))
+    .map(getNodePreviewLabel);
+  const updatedNodes = incomingNodes
+    .filter((node) => {
+      const current = currentNodeById.get(node.id);
+      return current && hasNodeUpdate(current, node);
+    })
+    .map(getNodePreviewLabel);
+
+  const addedEdges = incomingEdges
+    .filter((edge) => !currentEdgeById.has(edge.id))
+    .map(getEdgePreviewLabel);
+  const removedEdges = currentEdges
+    .filter((edge) => !incomingEdgeById.has(edge.id))
+    .map(getEdgePreviewLabel);
+  const updatedEdges = incomingEdges
+    .filter((edge) => {
+      const current = currentEdgeById.get(edge.id);
+      return current && hasEdgeUpdate(current, edge);
+    })
+    .map(getEdgePreviewLabel);
+
+  return {
+    nodes: {
+      added: addedNodes,
+      updated: updatedNodes,
+      removed: removedNodes,
+    },
+    edges: {
+      added: addedEdges,
+      updated: updatedEdges,
+      removed: removedEdges,
+    },
+  };
+}
+
+function simulateBundleImport(bundle, existingEdges) {
+  const validationError = validateBundle(bundle);
+  if (validationError) {
+    return { ok: false, error: validationError };
+  }
+
+  const normalizedNodes = bundle.nodes
+    .map((node) => normalizeNode(node))
+    .filter((node) => node !== null);
+
+  const nodesById = new Map(normalizedNodes.map((node) => [node.id, node]));
+  const normalizedEdges = buildCanonicalEdgesForImport(bundle, nodesById);
+
+  const edgeVersioningError = validateCommittedEdgeVersioningOnImport(
+    normalizedEdges,
+    existingEdges
+  );
+  if (edgeVersioningError) {
+    return { ok: false, error: edgeVersioningError };
+  }
+
+  const nodesWithEdges = applyEdgesToNodes(normalizedNodes, normalizedEdges);
+  const importValidationError = validateImportPayload(nodesWithEdges);
+  if (importValidationError) {
+    return { ok: false, error: importValidationError };
+  }
+
+  const committedGraphError = validateCommittedGraphIntegrity(
+    nodesWithEdges,
+    normalizedEdges
+  );
+  if (committedGraphError) {
+    return { ok: false, error: committedGraphError };
+  }
+
+  return {
+    ok: true,
+    nodesWithEdges,
+    normalizedEdges,
+    migratedFromV1: bundle.metadata.schemaVersion === "1",
+  };
+}
+
+function toDisplayItems(items, maxItems = 20) {
+  if (items.length <= maxItems) {
+    return items;
+  }
+
+  return [...items.slice(0, maxItems), `+${items.length - maxItems} more`];
+}
+
 export default function NodesDraftClient() {
   const initialNodes = loadDraftNodes();
   const initialEdges = loadDraftEdges(initialNodes);
@@ -758,6 +885,9 @@ export default function NodesDraftClient() {
   const [selectedId, setSelectedId] = useState(null);
   const [bundleText, setBundleText] = useState("");
   const [bundleMessage, setBundleMessage] = useState("");
+  const [dryRunMessage, setDryRunMessage] = useState("");
+  const [dryRunDetails, setDryRunDetails] = useState([]);
+  const [previewDiff, setPreviewDiff] = useState(null);
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState("");
   const [relationshipTargetId, setRelationshipTargetId] = useState("");
@@ -1115,6 +1245,22 @@ export default function NodesDraftClient() {
   }
 
   function handleExportBundle() {
+    const { bundle } = buildExportBundle();
+
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "venture-os-bundle.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setBundleMessage("Bundle exported.");
+  }
+
+  function buildExportBundle() {
     const canonicalEdges = syncEdges(draftNodes, draftEdges);
     const bundle = {
       metadata: {
@@ -1134,17 +1280,52 @@ export default function NodesDraftClient() {
       auditEvents: loadAuditEntries(),
     };
 
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
-      type: "application/json",
-    });
+    return { bundle, canonicalEdges };
+  }
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "venture-os-bundle.json";
-    link.click();
-    URL.revokeObjectURL(url);
-    setBundleMessage("Bundle exported.");
+  async function handleCopyBundleJson() {
+    try {
+      const { bundle } = buildExportBundle();
+      await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
+      setBundleMessage("Bundle JSON copied to clipboard.");
+    } catch {
+      setBundleMessage("Copy failed. Browser clipboard permission may be blocked.");
+    }
+  }
+
+  function handleValidateBundleDryRun() {
+    setPreviewDiff(null);
+    setDryRunDetails([]);
+    setDryRunMessage("");
+
+    try {
+      const parsed = JSON.parse(bundleText);
+      const simulation = simulateBundleImport(parsed, draftEdges);
+
+      if (!simulation.ok) {
+        setDryRunMessage(`Dry run failed: ${simulation.error}`);
+        return;
+      }
+
+      const preview = buildBundlePreview(
+        draftNodes,
+        draftEdges,
+        simulation.nodesWithEdges,
+        simulation.normalizedEdges
+      );
+
+      const details = [];
+      if (simulation.migratedFromV1) {
+        details.push("Migration note: schemaVersion 1 will be upgraded to version 2 on import.");
+      }
+      details.push("No local data was changed during dry run.");
+
+      setDryRunDetails(details.slice(0, 5));
+      setPreviewDiff(preview);
+      setDryRunMessage("Valid bundle. Ready to import.");
+    } catch {
+      setDryRunMessage("Dry run failed: Bundle JSON is not valid JSON.");
+    }
   }
 
   function handleImportBundle() {
@@ -1152,46 +1333,14 @@ export default function NodesDraftClient() {
 
     try {
       const parsed = JSON.parse(bundleText);
-      const validationError = validateBundle(parsed);
+      const simulation = simulateBundleImport(parsed, draftEdges);
 
-      if (validationError) {
-        setBundleMessage(`Import failed: ${validationError}`);
+      if (!simulation.ok) {
+        setBundleMessage(`Import failed: ${simulation.error}`);
         return;
       }
 
-      const normalizedNodes = parsed.nodes
-        .map((node) => normalizeNode(node))
-        .filter((node) => node !== null);
-
-      const nodesById = new Map(normalizedNodes.map((node) => [node.id, node]));
-      const normalizedEdges = buildCanonicalEdgesForImport(parsed, nodesById);
-
-      const edgeVersioningError = validateCommittedEdgeVersioningOnImport(
-        normalizedEdges,
-        draftEdges
-      );
-      if (edgeVersioningError) {
-        setBundleMessage(`Import failed: ${edgeVersioningError}`);
-        return;
-      }
-
-      const nodesWithEdges = applyEdgesToNodes(normalizedNodes, normalizedEdges);
-      const importValidationError = validateImportPayload(nodesWithEdges);
-      if (importValidationError) {
-        setBundleMessage(`Import failed: ${importValidationError}`);
-        return;
-      }
-
-      const committedGraphError = validateCommittedGraphIntegrity(
-        nodesWithEdges,
-        normalizedEdges
-      );
-      if (committedGraphError) {
-        setBundleMessage(`Import failed: ${committedGraphError}`);
-        return;
-      }
-
-      saveDraftState(nodesWithEdges, normalizedEdges);
+      saveDraftState(simulation.nodesWithEdges, simulation.normalizedEdges);
       saveAuditEntries(
         parsed.auditEvents.map((event) => ({
           ...event,
@@ -1234,6 +1383,12 @@ export default function NodesDraftClient() {
         <button type="button" onClick={handleExportBundle}>
           Export Bundle (JSON)
         </button>{" "}
+        <button type="button" onClick={handleCopyBundleJson}>
+          Copy Bundle JSON
+        </button>{" "}
+        <button type="button" onClick={handleValidateBundleDryRun}>
+          Validate Bundle (dry run)
+        </button>{" "}
         <button type="button" onClick={handleImportBundle}>
           Import Bundle
         </button>
@@ -1246,11 +1401,53 @@ export default function NodesDraftClient() {
         onChange={(event) => {
           setBundleText(event.target.value);
           setBundleMessage("");
+          setDryRunMessage("");
+          setDryRunDetails([]);
+          setPreviewDiff(null);
         }}
         rows={6}
         cols={50}
       />
       {bundleMessage ? <p>{bundleMessage}</p> : null}
+      {dryRunMessage ? <p>{dryRunMessage}</p> : null}
+      {dryRunDetails.length > 0 ? (
+        <ul>
+          {dryRunDetails.map((detail) => (
+            <li key={detail}>{detail}</li>
+          ))}
+        </ul>
+      ) : null}
+      {previewDiff ? (
+        <section>
+          <h3>Preview Changes</h3>
+          <p>
+            Nodes: +{previewDiff.nodes.added.length} / ~{previewDiff.nodes.updated.length} / -
+            {previewDiff.nodes.removed.length}
+          </p>
+          {previewDiff.nodes.added.length > 0 ? (
+            <p>Node adds: {toDisplayItems(previewDiff.nodes.added).join(", ")}</p>
+          ) : null}
+          {previewDiff.nodes.updated.length > 0 ? (
+            <p>Node updates: {toDisplayItems(previewDiff.nodes.updated).join(", ")}</p>
+          ) : null}
+          {previewDiff.nodes.removed.length > 0 ? (
+            <p>Node removals: {toDisplayItems(previewDiff.nodes.removed).join(", ")}</p>
+          ) : null}
+          <p>
+            Edges: +{previewDiff.edges.added.length} / ~{previewDiff.edges.updated.length} / -
+            {previewDiff.edges.removed.length}
+          </p>
+          {previewDiff.edges.added.length > 0 ? (
+            <p>Edge adds: {toDisplayItems(previewDiff.edges.added).join(", ")}</p>
+          ) : null}
+          {previewDiff.edges.updated.length > 0 ? (
+            <p>Edge updates: {toDisplayItems(previewDiff.edges.updated).join(", ")}</p>
+          ) : null}
+          {previewDiff.edges.removed.length > 0 ? (
+            <p>Edge removals: {toDisplayItems(previewDiff.edges.removed).join(", ")}</p>
+          ) : null}
+        </section>
+      ) : null}
 
       <form onSubmit={handleAddNode}>
         <label htmlFor="node-title">Title</label>
