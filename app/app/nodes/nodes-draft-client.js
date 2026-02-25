@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 const STORAGE_KEY = "draft_nodes";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
+const APP_VERSION = "local-draft-v1";
 const ALLOWED_TYPES = ["Decision", "Requirement", "Other"];
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 const STATUS_TYPES = ["proposed", "committed", "archived"];
@@ -219,6 +220,84 @@ function clearAuditEntries() {
   window.localStorage.removeItem(AUDIT_STORAGE_KEY);
 }
 
+function saveAuditEntries(entries) {
+  window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(entries));
+}
+
+function buildRelationshipList(nodes) {
+  return nodes.flatMap((node) => {
+    const relationships = Array.isArray(node.relationships)
+      ? node.relationships
+      : [];
+
+    return relationships
+      .filter((rel) => rel && typeof rel.targetId === "string")
+      .map((rel) => ({
+        sourceId: node.id,
+        targetId: rel.targetId,
+        type: RELATIONSHIP_TYPES.includes(rel.type) ? rel.type : "relates_to",
+      }));
+  });
+}
+
+function validateBundle(bundle) {
+  if (!bundle || typeof bundle !== "object") {
+    return "Bundle must be a JSON object.";
+  }
+
+  if (!bundle.metadata || typeof bundle.metadata !== "object") {
+    return "Bundle metadata is missing.";
+  }
+
+  if (typeof bundle.metadata.exportedAt !== "string") {
+    return "metadata.exportedAt must be a string.";
+  }
+
+  if (typeof bundle.metadata.appVersion !== "string") {
+    return "metadata.appVersion must be a string.";
+  }
+
+  const nodeValidationError = validateImportPayload(bundle.nodes);
+  if (nodeValidationError) {
+    return `nodes: ${nodeValidationError}`;
+  }
+
+  if (!Array.isArray(bundle.relationships)) {
+    return "relationships must be an array.";
+  }
+
+  const invalidRelationship = bundle.relationships.some(
+    (rel) =>
+      !rel ||
+      typeof rel !== "object" ||
+      typeof rel.sourceId !== "string" ||
+      typeof rel.targetId !== "string" ||
+      !RELATIONSHIP_TYPES.includes(rel.type)
+  );
+
+  if (invalidRelationship) {
+    return "Each relationship must include sourceId, targetId, and a valid type.";
+  }
+
+  if (!Array.isArray(bundle.auditEvents)) {
+    return "auditEvents must be an array.";
+  }
+
+  const invalidAuditEvent = bundle.auditEvents.some(
+    (event) =>
+      !event ||
+      typeof event !== "object" ||
+      typeof event.timestamp !== "string" ||
+      typeof event.action !== "string"
+  );
+
+  if (invalidAuditEvent) {
+    return "Each audit event needs at least timestamp and action strings.";
+  }
+
+  return null;
+}
+
 function validateImportPayload(payload) {
   if (!Array.isArray(payload)) {
     return "JSON must be an array of nodes.";
@@ -279,6 +358,8 @@ export default function NodesDraftClient() {
   const [showArchived, setShowArchived] = useState(false);
   const [draftNodes, setDraftNodes] = useState(loadDraftNodes);
   const [selectedId, setSelectedId] = useState(null);
+  const [bundleText, setBundleText] = useState("");
+  const [bundleMessage, setBundleMessage] = useState("");
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState("");
   const [relationshipTargetId, setRelationshipTargetId] = useState("");
@@ -468,6 +549,7 @@ export default function NodesDraftClient() {
     saveDraftNodes(demoNodes);
     clearAuditEntries();
     setSelectedId(null);
+    setBundleMessage("");
     setImportText("");
     setImportError("");
   }
@@ -476,8 +558,77 @@ export default function NodesDraftClient() {
     saveDraftNodes([]);
     clearAuditEntries();
     setSelectedId(null);
+    setBundleMessage("");
     setImportText("");
     setImportError("");
+  }
+
+  function handleExportBundle() {
+    const bundle = {
+      metadata: {
+        exportedAt: new Date().toISOString(),
+        appVersion: APP_VERSION,
+      },
+      nodes: draftNodes,
+      relationships: buildRelationshipList(draftNodes),
+      auditEvents: loadAuditEntries(),
+    };
+
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "venture-os-bundle.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setBundleMessage("Bundle exported.");
+  }
+
+  function handleImportBundle() {
+    setBundleMessage("");
+
+    try {
+      const parsed = JSON.parse(bundleText);
+      const validationError = validateBundle(parsed);
+
+      if (validationError) {
+        setBundleMessage(`Import failed: ${validationError}`);
+        return;
+      }
+
+      const normalizedNodes = parsed.nodes
+        .map((node) => normalizeNode(node))
+        .filter((node) => node !== null)
+        .map((node) => ({ ...node, relationships: [] }));
+
+      const nodesById = new Map(normalizedNodes.map((node) => [node.id, node]));
+
+      for (const rel of parsed.relationships) {
+        const sourceNode = nodesById.get(rel.sourceId);
+        const targetExists = nodesById.has(rel.targetId);
+
+        if (!sourceNode || !targetExists) {
+          continue;
+        }
+
+        sourceNode.relationships.push({
+          targetId: rel.targetId,
+          type: rel.type,
+        });
+      }
+
+      saveDraftNodes(normalizedNodes);
+      saveAuditEntries(parsed.auditEvents);
+      setSelectedId(null);
+      setImportText("");
+      setImportError("");
+      setBundleMessage("Bundle imported successfully.");
+    } catch {
+      setBundleMessage("Import failed: Invalid JSON.");
+    }
   }
 
   const relationshipTargetOptions = draftNodes.filter(
@@ -500,6 +651,27 @@ export default function NodesDraftClient() {
           Reset (clear all local data)
         </button>
       </p>
+      <p>
+        <button type="button" onClick={handleExportBundle}>
+          Export Bundle (JSON)
+        </button>{" "}
+        <button type="button" onClick={handleImportBundle}>
+          Import Bundle
+        </button>
+      </p>
+      <label htmlFor="bundle-json">Bundle JSON</label>
+      <br />
+      <textarea
+        id="bundle-json"
+        value={bundleText}
+        onChange={(event) => {
+          setBundleText(event.target.value);
+          setBundleMessage("");
+        }}
+        rows={6}
+        cols={50}
+      />
+      {bundleMessage ? <p>{bundleMessage}</p> : null}
 
       <form onSubmit={handleAddNode}>
         <label htmlFor="node-title">Title</label>
