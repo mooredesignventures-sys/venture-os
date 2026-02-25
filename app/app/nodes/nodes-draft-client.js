@@ -6,12 +6,14 @@ import SearchBox from "../../../src/components/ui/search-box";
 import SelectFilter from "../../../src/components/ui/select-filter";
 
 const STORAGE_KEY = "draft_nodes";
+const EDGE_STORAGE_KEY = "draft_edges";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
 const APP_VERSION = "local-draft-v1";
 const AUDIT_ACTOR = "founder";
 const ALLOWED_TYPES = ["Decision", "Requirement", "Other"];
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
-const STATUS_TYPES = ["proposed", "committed", "archived"];
+const STAGE_TYPES = ["proposed", "committed", "archived"];
+const WORK_STATUS_TYPES = ["queued", "in_progress", "review", "complete"];
 const DEMO_NODES = [
   {
     id: "demo_decision_1",
@@ -105,6 +107,10 @@ function createNodeId() {
   return `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function createEdgeId() {
+  return `edge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function normalizeRelationships(rawNode) {
   const typedRelationships = Array.isArray(rawNode.relationships)
     ? rawNode.relationships
@@ -130,11 +136,11 @@ function normalizeRelationships(rawNode) {
 }
 
 function normalizeStatus(rawNode) {
-  if (STATUS_TYPES.includes(rawNode.stage)) {
+  if (STAGE_TYPES.includes(rawNode.stage)) {
     return rawNode.stage;
   }
 
-  if (STATUS_TYPES.includes(rawNode.status)) {
+  if (STAGE_TYPES.includes(rawNode.status)) {
     return rawNode.status;
   }
 
@@ -143,6 +149,18 @@ function normalizeStatus(rawNode) {
   }
 
   return "proposed";
+}
+
+function normalizeWorkflowStatus(rawNode) {
+  if (WORK_STATUS_TYPES.includes(rawNode.status)) {
+    return rawNode.status;
+  }
+
+  if (WORK_STATUS_TYPES.includes(rawNode.workflowStatus)) {
+    return rawNode.workflowStatus;
+  }
+
+  return "queued";
 }
 
 function normalizeNode(rawNode) {
@@ -166,6 +184,15 @@ function normalizeNode(rawNode) {
     ? rawNode.createdAt
     : Date.now();
   const stage = normalizeStatus(rawNode);
+  const status = normalizeWorkflowStatus(rawNode);
+  const version =
+    Number.isFinite(rawNode.version) && rawNode.version > 0
+      ? Math.floor(rawNode.version)
+      : 1;
+  const createdBy =
+    typeof rawNode.createdBy === "string" && rawNode.createdBy.trim()
+      ? rawNode.createdBy
+      : AUDIT_ACTOR;
 
   return {
     id,
@@ -173,7 +200,9 @@ function normalizeNode(rawNode) {
     type,
     createdAt,
     stage,
-    status: stage,
+    status,
+    version,
+    createdBy,
     relationships: normalizeRelationships(rawNode),
   };
 }
@@ -234,20 +263,123 @@ function saveAuditEntries(entries) {
   window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(entries));
 }
 
-function buildRelationshipList(nodes) {
-  return nodes.flatMap((node) => {
-    const relationships = Array.isArray(node.relationships)
-      ? node.relationships
-      : [];
+function normalizeEdge(rawEdge, nodeById) {
+  if (!rawEdge || typeof rawEdge !== "object") {
+    return null;
+  }
 
+  const from = typeof rawEdge.from === "string" ? rawEdge.from : rawEdge.sourceId;
+  const to = typeof rawEdge.to === "string" ? rawEdge.to : rawEdge.targetId;
+  const relationshipType =
+    typeof rawEdge.relationshipType === "string" ? rawEdge.relationshipType : rawEdge.type;
+
+  if (typeof from !== "string" || !from || typeof to !== "string" || !to) {
+    return null;
+  }
+
+  if (!nodeById.has(from) || !nodeById.has(to)) {
+    return null;
+  }
+
+  if (!RELATIONSHIP_TYPES.includes(relationshipType)) {
+    return null;
+  }
+
+  return {
+    id:
+      typeof rawEdge.id === "string" && rawEdge.id.trim()
+        ? rawEdge.id
+        : createEdgeId(),
+    from,
+    to,
+    relationshipType,
+    stage: STAGE_TYPES.includes(rawEdge.stage) ? rawEdge.stage : "proposed",
+    version:
+      Number.isFinite(rawEdge.version) && rawEdge.version > 0
+        ? Math.floor(rawEdge.version)
+        : 1,
+    createdAt: Number.isFinite(rawEdge.createdAt) ? rawEdge.createdAt : Date.now(),
+    createdBy:
+      typeof rawEdge.createdBy === "string" && rawEdge.createdBy.trim()
+        ? rawEdge.createdBy
+        : AUDIT_ACTOR,
+  };
+}
+
+function createEdgeFromRelationship(sourceNode, relationship) {
+  return {
+    id: createEdgeId(),
+    from: sourceNode.id,
+    to: relationship.targetId,
+    relationshipType: relationship.type,
+    stage: sourceNode.stage === "committed" ? "committed" : "proposed",
+    version: 1,
+    createdAt: Date.now(),
+    createdBy: sourceNode.createdBy || AUDIT_ACTOR,
+  };
+}
+
+function buildEdgesFromNodes(nodes) {
+  return nodes.flatMap((node) => {
+    const relationships = Array.isArray(node.relationships) ? node.relationships : [];
     return relationships
       .filter((rel) => rel && typeof rel.targetId === "string")
-      .map((rel) => ({
-        sourceId: node.id,
-        targetId: rel.targetId,
-        type: RELATIONSHIP_TYPES.includes(rel.type) ? rel.type : "relates_to",
-      }));
+      .map((relationship) => createEdgeFromRelationship(node, relationship));
   });
+}
+
+function applyEdgesToNodes(nodes, edges) {
+  const relationshipMap = new Map();
+
+  for (const edge of edges) {
+    if (edge.stage === "archived") {
+      continue;
+    }
+
+    if (!relationshipMap.has(edge.from)) {
+      relationshipMap.set(edge.from, []);
+    }
+
+    relationshipMap.get(edge.from).push({
+      targetId: edge.to,
+      type: edge.relationshipType,
+    });
+  }
+
+  return nodes.map((node) => ({
+    ...node,
+    relationships: relationshipMap.get(node.id) || [],
+  }));
+}
+
+function loadDraftEdges(nodes) {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(EDGE_STORAGE_KEY);
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+
+    if (!raw) {
+      const migrated = buildEdgesFromNodes(nodes);
+      window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      const migrated = buildEdgesFromNodes(nodes);
+      window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
+    }
+
+    return parsed
+      .map((edge) => normalizeEdge(edge, nodeById))
+      .filter((edge) => edge !== null);
+  } catch {
+    return buildEdgesFromNodes(nodes);
+  }
 }
 
 function validateBundle(bundle) {
@@ -296,25 +428,52 @@ function validateBundle(bundle) {
     return `nodes: ${nodeValidationError}`;
   }
 
-  if (!Object.prototype.hasOwnProperty.call(bundle, "relationships")) {
-    return "Missing field: relationships";
-  }
-
-  if (!Array.isArray(bundle.relationships)) {
-    return "Invalid field: relationships must be an array.";
-  }
-
-  const invalidRelationship = bundle.relationships.some(
-    (rel) =>
-      !rel ||
-      typeof rel !== "object" ||
-      typeof rel.sourceId !== "string" ||
-      typeof rel.targetId !== "string" ||
-      !RELATIONSHIP_TYPES.includes(rel.type)
+  const hasLegacyRelationships = Object.prototype.hasOwnProperty.call(
+    bundle,
+    "relationships"
   );
+  const hasEdges = Object.prototype.hasOwnProperty.call(bundle, "edges");
 
-  if (invalidRelationship) {
-    return "Each relationship must include sourceId, targetId, and a valid type.";
+  if (!hasLegacyRelationships && !hasEdges) {
+    return "Missing field: relationships or edges";
+  }
+
+  if (hasLegacyRelationships) {
+    if (!Array.isArray(bundle.relationships)) {
+      return "Invalid field: relationships must be an array.";
+    }
+
+    const invalidRelationship = bundle.relationships.some(
+      (rel) =>
+        !rel ||
+        typeof rel !== "object" ||
+        typeof rel.sourceId !== "string" ||
+        typeof rel.targetId !== "string" ||
+        !RELATIONSHIP_TYPES.includes(rel.type)
+    );
+
+    if (invalidRelationship) {
+      return "Each relationship must include sourceId, targetId, and a valid type.";
+    }
+  }
+
+  if (hasEdges) {
+    if (!Array.isArray(bundle.edges)) {
+      return "Invalid field: edges must be an array.";
+    }
+
+    const invalidEdge = bundle.edges.some(
+      (edge) =>
+        !edge ||
+        typeof edge !== "object" ||
+        typeof edge.from !== "string" ||
+        typeof edge.to !== "string" ||
+        !RELATIONSHIP_TYPES.includes(edge.relationshipType)
+    );
+
+    if (invalidEdge) {
+      return "Each edge must include from, to, and a valid relationshipType.";
+    }
   }
 
   if (!Object.prototype.hasOwnProperty.call(bundle, "auditEvents")) {
@@ -359,11 +518,15 @@ function validateImportPayload(payload) {
       return "Each node type must be Decision, Requirement, or Other.";
     }
 
-    if (item.status !== undefined && !STATUS_TYPES.includes(item.status)) {
-      return "status must be proposed, committed, or archived.";
+    if (
+      item.status !== undefined &&
+      !STAGE_TYPES.includes(item.status) &&
+      !WORK_STATUS_TYPES.includes(item.status)
+    ) {
+      return "status must be lifecycle (legacy) or queued/in_progress/review/complete.";
     }
 
-    if (item.stage !== undefined && !STATUS_TYPES.includes(item.stage)) {
+    if (item.stage !== undefined && !STAGE_TYPES.includes(item.stage)) {
       return "stage must be proposed, committed, or archived.";
     }
 
@@ -419,18 +582,34 @@ function validateImportPayload(payload) {
         return "Committed nodes cannot link to proposed nodes.";
       }
     }
+
+    if (node.type === "Requirement" && nodeStage === "committed") {
+      const decisionLinks = node.relationships.filter((relationship) => {
+        const target = nodeById.get(relationship.targetId);
+        return target?.type === "Decision";
+      });
+
+      if (decisionLinks.length !== 1) {
+        return "Committed Requirement nodes must link to exactly one Decision.";
+      }
+    }
   }
 
   return null;
 }
 
 export default function NodesDraftClient() {
+  const initialNodes = loadDraftNodes();
+  const initialEdges = loadDraftEdges(initialNodes);
   const [title, setTitle] = useState("");
   const [type, setType] = useState("Decision");
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState("newest");
   const [showArchived, setShowArchived] = useState(false);
-  const [draftNodes, setDraftNodes] = useState(loadDraftNodes);
+  const [draftNodes, setDraftNodes] = useState(() =>
+    applyEdgesToNodes(initialNodes, initialEdges)
+  );
+  const [draftEdges, setDraftEdges] = useState(initialEdges);
   const [selectedId, setSelectedId] = useState(null);
   const [bundleText, setBundleText] = useState("");
   const [bundleMessage, setBundleMessage] = useState("");
@@ -439,6 +618,8 @@ export default function NodesDraftClient() {
   const [relationshipTargetId, setRelationshipTargetId] = useState("");
   const [relationshipType, setRelationshipType] = useState("relates_to");
   const [relationshipError, setRelationshipError] = useState("");
+  const [commitConfirmText, setCommitConfirmText] = useState("");
+  const [commitError, setCommitError] = useState("");
 
   const selectedNode = draftNodes.find((node) => node.id === selectedId) || null;
   const selectedStage = selectedNode ? normalizeStatus(selectedNode) : null;
@@ -449,6 +630,31 @@ export default function NodesDraftClient() {
     () => new Map(draftNodes.map((node) => [node.id, node])),
     [draftNodes]
   );
+
+  function syncEdges(nextNodes, currentEdges) {
+    const nextNodeById = new Map(nextNodes.map((node) => [node.id, node]));
+    const existingByKey = new Map(
+      currentEdges.map((edge) => [
+        `${edge.from}|${edge.to}|${edge.relationshipType}`,
+        edge,
+      ])
+    );
+
+    return buildEdgesFromNodes(nextNodes).map((candidate) => {
+      const key = `${candidate.from}|${candidate.to}|${candidate.relationshipType}`;
+      const existing = existingByKey.get(key);
+      return existing
+        ? {
+            ...existing,
+            stage:
+              normalizeStatus(nextNodeById.get(existing.from) || { stage: "proposed" }) ===
+              "committed"
+                ? "committed"
+                : existing.stage,
+          }
+        : candidate;
+    });
+  }
 
   const visibleNodes = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -476,9 +682,17 @@ export default function NodesDraftClient() {
     return sorted;
   }, [draftNodes, search, sortMode, showArchived]);
 
+  function saveDraftState(nextNodes, nextEdges) {
+    const nodesWithEdges = applyEdgesToNodes(nextNodes, nextEdges);
+    setDraftNodes(nodesWithEdges);
+    setDraftEdges(nextEdges);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nodesWithEdges));
+    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(nextEdges));
+  }
+
   function saveDraftNodes(nextNodes) {
-    setDraftNodes(nextNodes);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextNodes));
+    const nextEdges = syncEdges(nextNodes, draftEdges);
+    saveDraftState(nextNodes, nextEdges);
   }
 
   function handleAddNode(event) {
@@ -494,14 +708,18 @@ export default function NodesDraftClient() {
       title: trimmedTitle,
       type,
       createdAt: Date.now(),
+      version: 1,
+      createdBy: AUDIT_ACTOR,
       stage: "proposed",
-      status: "proposed",
+      status: "queued",
       relationships: [],
     };
 
     const nextNodes = [...draftNodes, nextNode];
     saveDraftNodes(nextNodes);
     setSelectedId(nextNode.id);
+    setCommitConfirmText("");
+    setCommitError("");
     setTitle("");
     setType("Decision");
   }
@@ -531,8 +749,58 @@ export default function NodesDraftClient() {
     saveDraftNodes(nextNodes);
   }
 
+  function validateNodeForCommit(node, allNodes) {
+    const allNodeById = new Map(allNodes.map((item) => [item.id, item]));
+    const nodeStage = normalizeStatus(node);
+
+    if (nodeStage === "archived") {
+      return "Archived nodes cannot be committed.";
+    }
+
+    if (nodeStage === "committed") {
+      return "Node is already committed.";
+    }
+
+    const nodeRelationships = Array.isArray(node.relationships) ? node.relationships : [];
+
+    for (const relationship of nodeRelationships) {
+      const target = allNodeById.get(relationship.targetId);
+      if (!target) {
+        continue;
+      }
+
+      if (normalizeStatus(target) === "proposed") {
+        return "Committed nodes cannot link to proposed nodes.";
+      }
+    }
+
+    if (node.type === "Requirement") {
+      const decisionLinks = nodeRelationships.filter((relationship) => {
+        const target = allNodeById.get(relationship.targetId);
+        return target?.type === "Decision";
+      });
+
+      if (decisionLinks.length !== 1) {
+        return "Requirement must link to exactly one Decision before commit.";
+      }
+    }
+
+    return null;
+  }
+
   function handleCommitSelected() {
-    if (!selectedNode || selectedNode.status !== "proposed") {
+    if (!selectedNode || selectedStage !== "proposed") {
+      return;
+    }
+
+    if (commitConfirmText !== "CONFIRMED") {
+      setCommitError("Type CONFIRMED before committing.");
+      return;
+    }
+
+    const commitValidationError = validateNodeForCommit(selectedNode, draftNodes);
+    if (commitValidationError) {
+      setCommitError(commitValidationError);
       return;
     }
 
@@ -544,15 +812,19 @@ export default function NodesDraftClient() {
       nodeTitle: selectedNode.title,
       actor: AUDIT_ACTOR,
     });
+    setCommitConfirmText("");
+    setCommitError("");
   }
 
   function handleArchiveSelected() {
-    if (!selectedNode || selectedNode.status === "archived") {
+    if (!selectedNode || selectedStage === "archived") {
       return;
     }
 
     updateSelectedNode({ status: "archived", stage: "archived" });
     setSelectedId(null);
+    setCommitConfirmText("");
+    setCommitError("");
   }
 
   function handleAddRelationship() {
@@ -651,6 +923,9 @@ export default function NodesDraftClient() {
 
       saveDraftNodes(normalized);
       setSelectedId(null);
+      setCommitConfirmText("");
+      setCommitError("");
+      setRelationshipError("");
     } catch {
       setImportError("Invalid JSON.");
     }
@@ -667,6 +942,8 @@ export default function NodesDraftClient() {
     setImportText("");
     setImportError("");
     setRelationshipError("");
+    setCommitConfirmText("");
+    setCommitError("");
   }
 
   function handleResetDemoData() {
@@ -677,9 +954,12 @@ export default function NodesDraftClient() {
     setImportText("");
     setImportError("");
     setRelationshipError("");
+    setCommitConfirmText("");
+    setCommitError("");
   }
 
   function handleExportBundle() {
+    const canonicalEdges = syncEdges(draftNodes, draftEdges);
     const bundle = {
       metadata: {
         schemaVersion: "1",
@@ -687,7 +967,12 @@ export default function NodesDraftClient() {
         appVersion: APP_VERSION,
       },
       nodes: draftNodes,
-      relationships: buildRelationshipList(draftNodes),
+      edges: canonicalEdges,
+      relationships: canonicalEdges.map((edge) => ({
+        sourceId: edge.from,
+        targetId: edge.to,
+        type: edge.relationshipType,
+      })),
       auditEvents: loadAuditEntries(),
     };
 
@@ -718,26 +1003,32 @@ export default function NodesDraftClient() {
 
       const normalizedNodes = parsed.nodes
         .map((node) => normalizeNode(node))
-        .filter((node) => node !== null)
-        .map((node) => ({ ...node, relationships: [] }));
+        .filter((node) => node !== null);
 
       const nodesById = new Map(normalizedNodes.map((node) => [node.id, node]));
 
-      for (const rel of parsed.relationships) {
-        const sourceNode = nodesById.get(rel.sourceId);
-        const targetExists = nodesById.has(rel.targetId);
+      const parsedEdges = Array.isArray(parsed.edges)
+        ? parsed.edges
+        : Array.isArray(parsed.relationships)
+          ? parsed.relationships.map((rel) => ({
+              from: rel.sourceId,
+              to: rel.targetId,
+              relationshipType: rel.type,
+            }))
+          : [];
 
-        if (!sourceNode || !targetExists) {
-          continue;
-        }
+      const normalizedEdges = parsedEdges
+        .map((edge) => normalizeEdge(edge, nodesById))
+        .filter((edge) => edge !== null);
 
-        sourceNode.relationships.push({
-          targetId: rel.targetId,
-          type: rel.type,
-        });
+      const nodesWithEdges = applyEdgesToNodes(normalizedNodes, normalizedEdges);
+      const importValidationError = validateImportPayload(nodesWithEdges);
+      if (importValidationError) {
+        setBundleMessage(`Import failed: ${importValidationError}`);
+        return;
       }
 
-      saveDraftNodes(normalizedNodes);
+      saveDraftState(nodesWithEdges, normalizedEdges);
       saveAuditEntries(
         parsed.auditEvents.map((event) => ({
           ...event,
@@ -748,6 +1039,8 @@ export default function NodesDraftClient() {
       setImportText("");
       setImportError("");
       setRelationshipError("");
+      setCommitConfirmText("");
+      setCommitError("");
       setBundleMessage("Bundle imported successfully.");
     } catch {
       setBundleMessage("Import failed: Invalid JSON.");
@@ -887,8 +1180,16 @@ export default function NodesDraftClient() {
         <ul>
           {visibleNodes.map((node) => (
             <li key={node.id}>
-              <button type="button" onClick={() => setSelectedId(node.id)}>
-                {node.title} ({node.type}) [{node.status}]
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedId(node.id);
+                  setCommitConfirmText("");
+                  setCommitError("");
+                  setRelationshipError("");
+                }}
+              >
+                {node.title} ({node.type}) [{node.stage || normalizeStatus(node)}]
               </button>
             </li>
           ))}
@@ -903,6 +1204,11 @@ export default function NodesDraftClient() {
           <p>
             Status: <strong>{selectedStage}</strong>{" "}
             {selectedIsCommitted ? <span>Committed</span> : null}
+          </p>
+          <p>
+            Workflow status: <strong>{selectedNode.status}</strong> | Version:{" "}
+            <strong>{selectedNode.version}</strong> | Created by:{" "}
+            <strong>{selectedNode.createdBy}</strong>
           </p>
 
           <label htmlFor="detail-title">Title</label>
@@ -934,7 +1240,7 @@ export default function NodesDraftClient() {
             <button
               type="button"
               onClick={handleCommitSelected}
-              disabled={selectedNode.status !== "proposed"}
+              disabled={selectedStage !== "proposed"}
             >
               Commit
             </button>{" "}
@@ -946,6 +1252,21 @@ export default function NodesDraftClient() {
               Archive
             </button>
           </p>
+          {selectedStage === "proposed" ? (
+            <p>
+              <label htmlFor="commit-confirmed">Type CONFIRMED to commit</label>
+              <br />
+              <input
+                id="commit-confirmed"
+                value={commitConfirmText}
+                onChange={(event) => {
+                  setCommitConfirmText(event.target.value);
+                  setCommitError("");
+                }}
+              />
+            </p>
+          ) : null}
+          {commitError ? <p>{commitError}</p> : null}
           {selectedIsCommitted ? (
             <p>Committed nodes are locked. Committed nodes cannot link to proposed nodes.</p>
           ) : null}

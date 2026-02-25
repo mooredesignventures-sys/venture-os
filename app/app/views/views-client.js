@@ -29,6 +29,10 @@ function normalizeRelationships(node) {
 }
 
 function normalizeStatus(node) {
+  if (node.stage === "archived") {
+    return "archived";
+  }
+
   if (node.status === "archived") {
     return "archived";
   }
