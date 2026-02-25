@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import ProposalsClient from "./proposals-client";
+import AppNav from "../../../src/components/app-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,8 @@ export default async function ProposalsPage() {
   return (
     <main>
       <h1>Guided Proposals (Draft)</h1>
-      <p>Draft only \u2014 text templates, no governance rules yet.</p>
+      <p>Draft only - text templates, no governance rules yet.</p>
+      <AppNav current="/app/proposals" />
       <ProposalsClient />
       <nav>
         <Link href="/app">App area</Link> | <Link href="/app/nodes">Nodes</Link> |{" "}

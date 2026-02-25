@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import AppNav from "../../../src/components/app-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,8 @@ export default async function TourPage() {
   return (
     <main>
       <h1>Guided Tour (2 minutes)</h1>
+      <p>Follow these steps to walk through the draft prototype.</p>
+      <AppNav current="/app/tour" />
       <ol>
         <li>
           Open <Link href="/app/nodes">Nodes</Link> and click <strong>Load Demo Data</strong>.

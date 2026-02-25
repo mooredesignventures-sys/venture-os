@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import ExitButton from "./exit-button";
+import AppNav from "../../src/components/app-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,9 @@ export default async function AppPage() {
 
   return (
     <main>
-      <h1>App area (placeholder)</h1>
+      <h1>App Workspace</h1>
+      <p>Navigate prototype areas quickly.</p>
+      <AppNav current="/app" />
       <p>
         <Link href="/app/nodes">Nodes (Draft)</Link>
       </p>

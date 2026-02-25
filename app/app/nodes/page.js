@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import NodesDraftClientLoader from "./nodes-draft-client-loader";
+import AppNav from "../../../src/components/app-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +17,13 @@ export default async function NodesPage() {
   return (
     <main>
       <h1>Nodes (Draft)</h1>
-      <p>{"Draft only \u2014 DB will come after Master Spec"}</p>
+      <p>Draft only - DB will come after Master Spec.</p>
+      <p>Manage draft nodes, relationships, and local bundle actions.</p>
+      <AppNav current="/app/nodes" />
       <NodesDraftClientLoader />
-      <nav>
-        <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
-        <Link href="/app/nodes">Nodes (Draft)</Link>
-      </nav>
+      <p>
+        <Link href="/">Home</Link> | <Link href="/app">App area</Link>
+      </p>
     </main>
   );
 }

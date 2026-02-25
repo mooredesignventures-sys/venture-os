@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import EmptyState from "../../../src/components/ui/empty-state";
 
 const AUDIT_STORAGE_KEY = "draft_audit_log";
 
@@ -22,7 +23,12 @@ export default function AuditClient() {
   const [entries] = useState(loadAuditEntries);
 
   if (entries.length === 0) {
-    return <p>No audit entries yet.</p>;
+    return (
+      <EmptyState
+        title="No audit entries yet."
+        message="Commit a node in Nodes to create the first audit event."
+      />
+    );
   }
 
   const ordered = [...entries].sort((a, b) =>

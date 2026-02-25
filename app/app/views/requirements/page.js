@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import ViewClientLoader from "../view-client-loader";
+import AppNav from "../../../../src/components/app-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,8 @@ export default async function RequirementsViewPage() {
   return (
     <main>
       <h1>Requirements Tree (Draft)</h1>
+      <p>Requirement nodes with related draft items.</p>
+      <AppNav current="/app/views" />
       <ViewClientLoader mode="requirements" />
       <nav>
         <Link href="/app/views">Views</Link> | <Link href="/app/nodes">Nodes</Link>

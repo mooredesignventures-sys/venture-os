@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import EmptyState from "../../../src/components/ui/empty-state";
+import SearchBox from "../../../src/components/ui/search-box";
+import SelectFilter from "../../../src/components/ui/select-filter";
 
 const STORAGE_KEY = "draft_nodes";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
@@ -756,25 +759,23 @@ export default function NodesDraftClient() {
 
       <h2>Draft nodes</h2>
 
-      <label htmlFor="search-title">Search title</label>
-      <br />
-      <input
+      <SearchBox
         id="search-title"
+        label="Search title"
         value={search}
-        onChange={(event) => setSearch(event.target.value)}
+        onChange={setSearch}
       />
       <br />
-
-      <label htmlFor="sort-mode">Sort</label>
-      <br />
-      <select
+      <SelectFilter
         id="sort-mode"
+        label="Sort"
         value={sortMode}
-        onChange={(event) => setSortMode(event.target.value)}
-      >
-        <option value="newest">Newest</option>
-        <option value="az">A-Z</option>
-      </select>
+        onChange={setSortMode}
+        options={[
+          { value: "newest", label: "Newest" },
+          { value: "az", label: "A-Z" },
+        ]}
+      />
       <br />
       <label>
         <input
@@ -786,7 +787,15 @@ export default function NodesDraftClient() {
       </label>
 
       {visibleNodes.length === 0 ? (
-        <p>No draft nodes found.</p>
+        <EmptyState
+          title="No draft nodes found."
+          message="Load demo data or add your first draft node to get started."
+          action={
+            <button type="button" onClick={handleLoadDemoData}>
+              Load Demo Data
+            </button>
+          }
+        />
       ) : (
         <ul>
           {visibleNodes.map((node) => (
