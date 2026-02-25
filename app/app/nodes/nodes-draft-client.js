@@ -3,8 +3,10 @@
 import { useMemo, useState } from "react";
 
 const STORAGE_KEY = "draft_nodes";
+const AUDIT_STORAGE_KEY = "draft_audit_log";
 const ALLOWED_TYPES = ["Decision", "Requirement", "Other"];
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
+const STATUS_TYPES = ["proposed", "committed", "archived"];
 
 function createNodeId() {
   return `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -34,6 +36,18 @@ function normalizeRelationships(rawNode) {
   return relatedIds.map((targetId) => ({ targetId, type: "relates_to" }));
 }
 
+function normalizeStatus(rawNode) {
+  if (STATUS_TYPES.includes(rawNode.status)) {
+    return rawNode.status;
+  }
+
+  if (rawNode.archived) {
+    return "archived";
+  }
+
+  return "proposed";
+}
+
 function normalizeNode(rawNode) {
   if (!rawNode || typeof rawNode !== "object") {
     return null;
@@ -55,10 +69,14 @@ function normalizeNode(rawNode) {
     ? rawNode.createdAt
     : Date.now();
 
-  const archived = Boolean(rawNode.archived);
-  const relationships = normalizeRelationships(rawNode);
-
-  return { id, title, type, createdAt, archived, relationships };
+  return {
+    id,
+    title,
+    type,
+    createdAt,
+    status: normalizeStatus(rawNode),
+    relationships: normalizeRelationships(rawNode),
+  };
 }
 
 function loadDraftNodes() {
@@ -85,6 +103,30 @@ function loadDraftNodes() {
   }
 }
 
+function loadAuditEntries() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(AUDIT_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function appendAuditEntry(entry) {
+  const currentEntries = loadAuditEntries();
+  const nextEntries = [...currentEntries, entry];
+  window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(nextEntries));
+}
+
 function validateImportPayload(payload) {
   if (!Array.isArray(payload)) {
     return "JSON must be an array of nodes.";
@@ -101,6 +143,10 @@ function validateImportPayload(payload) {
 
     if (!ALLOWED_TYPES.includes(item.type)) {
       return "Each node type must be Decision, Requirement, or Other.";
+    }
+
+    if (item.status !== undefined && !STATUS_TYPES.includes(item.status)) {
+      return "status must be proposed, committed, or archived.";
     }
 
     if (item.relationships !== undefined) {
@@ -138,6 +184,7 @@ export default function NodesDraftClient() {
   const [type, setType] = useState("Decision");
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState("newest");
+  const [showArchived, setShowArchived] = useState(false);
   const [draftNodes, setDraftNodes] = useState(loadDraftNodes);
   const [selectedId, setSelectedId] = useState(null);
   const [importText, setImportText] = useState("");
@@ -146,6 +193,7 @@ export default function NodesDraftClient() {
   const [relationshipType, setRelationshipType] = useState("relates_to");
 
   const selectedNode = draftNodes.find((node) => node.id === selectedId) || null;
+  const selectedIsCommitted = selectedNode?.status === "committed";
 
   const nodeById = useMemo(
     () => new Map(draftNodes.map((node) => [node.id, node])),
@@ -156,7 +204,7 @@ export default function NodesDraftClient() {
     const term = search.trim().toLowerCase();
 
     const filtered = draftNodes.filter((node) => {
-      if (node.archived) {
+      if (!showArchived && node.status === "archived") {
         return false;
       }
 
@@ -176,7 +224,7 @@ export default function NodesDraftClient() {
     }
 
     return sorted;
-  }, [draftNodes, search, sortMode]);
+  }, [draftNodes, search, sortMode, showArchived]);
 
   function saveDraftNodes(nextNodes) {
     setDraftNodes(nextNodes);
@@ -196,7 +244,7 @@ export default function NodesDraftClient() {
       title: trimmedTitle,
       type,
       createdAt: Date.now(),
-      archived: false,
+      status: "proposed",
       relationships: [],
     };
 
@@ -223,37 +271,31 @@ export default function NodesDraftClient() {
     saveDraftNodes(nextNodes);
   }
 
-  function handleArchiveSelected() {
-    if (!selectedNode) {
+  function handleCommitSelected() {
+    if (!selectedNode || selectedNode.status !== "proposed") {
       return;
     }
 
-    updateSelectedNode({ archived: true });
-    setSelectedId(null);
+    updateSelectedNode({ status: "committed" });
+    appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      action: "NODE_COMMITTED",
+      nodeId: selectedNode.id,
+      nodeTitle: selectedNode.title,
+    });
   }
 
-  function handleRemoveSelected() {
-    if (!selectedNode) {
+  function handleArchiveSelected() {
+    if (!selectedNode || selectedNode.status === "archived") {
       return;
     }
 
-    const removedId = selectedNode.id;
-
-    const nextNodes = draftNodes
-      .filter((node) => node.id !== removedId)
-      .map((node) => ({
-        ...node,
-        relationships: Array.isArray(node.relationships)
-          ? node.relationships.filter((rel) => rel.targetId !== removedId)
-          : [],
-      }));
-
-    saveDraftNodes(nextNodes);
+    updateSelectedNode({ status: "archived" });
     setSelectedId(null);
   }
 
   function handleAddRelationship() {
-    if (!selectedNode || !relationshipTargetId) {
+    if (!selectedNode || !relationshipTargetId || selectedIsCommitted) {
       return;
     }
 
@@ -282,7 +324,7 @@ export default function NodesDraftClient() {
   }
 
   function handleRemoveRelationship(indexToRemove) {
-    if (!selectedNode) {
+    if (!selectedNode || selectedIsCommitted) {
       return;
     }
 
@@ -324,14 +366,13 @@ export default function NodesDraftClient() {
 
       saveDraftNodes(normalized);
       setSelectedId(null);
-      setImportError("");
     } catch {
       setImportError("Invalid JSON.");
     }
   }
 
   const relationshipTargetOptions = draftNodes.filter(
-    (node) => !node.archived && node.id !== selectedId
+    (node) => node.status !== "archived" && node.id !== selectedId
   );
 
   const selectedRelationships = selectedNode
@@ -411,6 +452,15 @@ export default function NodesDraftClient() {
         <option value="newest">Newest</option>
         <option value="az">A-Z</option>
       </select>
+      <br />
+      <label>
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={(event) => setShowArchived(event.target.checked)}
+        />{" "}
+        Show archived
+      </label>
 
       {visibleNodes.length === 0 ? (
         <p>No draft nodes found.</p>
@@ -419,7 +469,7 @@ export default function NodesDraftClient() {
           {visibleNodes.map((node) => (
             <li key={node.id}>
               <button type="button" onClick={() => setSelectedId(node.id)}>
-                {node.title} ({node.type})
+                {node.title} ({node.type}) [{node.status}]
               </button>
             </li>
           ))}
@@ -431,11 +481,17 @@ export default function NodesDraftClient() {
         <p>Select a node to view or edit details.</p>
       ) : (
         <div>
+          <p>
+            Status: <strong>{selectedNode.status}</strong>{" "}
+            {selectedNode.status === "committed" ? <span>Committed</span> : null}
+          </p>
+
           <label htmlFor="detail-title">Title</label>
           <br />
           <input
             id="detail-title"
             value={selectedNode.title}
+            disabled={selectedIsCommitted}
             onChange={(event) => {
               const nextTitle = event.target.value;
               updateSelectedNode({ title: nextTitle });
@@ -447,6 +503,7 @@ export default function NodesDraftClient() {
           <select
             id="detail-type"
             value={selectedNode.type}
+            disabled={selectedIsCommitted}
             onChange={(event) => updateSelectedNode({ type: event.target.value })}
           >
             <option>Decision</option>
@@ -455,11 +512,19 @@ export default function NodesDraftClient() {
           </select>
 
           <p>
-            <button type="button" onClick={handleArchiveSelected}>
-              Archive
+            <button
+              type="button"
+              onClick={handleCommitSelected}
+              disabled={selectedNode.status !== "proposed"}
+            >
+              Commit
             </button>{" "}
-            <button type="button" onClick={handleRemoveSelected}>
-              Remove
+            <button
+              type="button"
+              onClick={handleArchiveSelected}
+              disabled={selectedNode.status === "archived"}
+            >
+              Archive
             </button>
           </p>
 
@@ -479,6 +544,7 @@ export default function NodesDraftClient() {
                     {relationship.type}: {targetNode.title} ({targetNode.type}){" "}
                     <button
                       type="button"
+                      disabled={selectedIsCommitted}
                       onClick={() => handleRemoveRelationship(index)}
                     >
                       Remove
@@ -496,6 +562,7 @@ export default function NodesDraftClient() {
               <select
                 id="relationship-target"
                 value={relationshipTargetId}
+                disabled={selectedIsCommitted}
                 onChange={(event) => setRelationshipTargetId(event.target.value)}
               >
                 <option value="">Select node...</option>
@@ -507,13 +574,18 @@ export default function NodesDraftClient() {
               </select>{" "}
               <select
                 value={relationshipType}
+                disabled={selectedIsCommitted}
                 onChange={(event) => setRelationshipType(event.target.value)}
               >
                 <option value="depends_on">depends_on</option>
                 <option value="enables">enables</option>
                 <option value="relates_to">relates_to</option>
               </select>{" "}
-              <button type="button" onClick={handleAddRelationship}>
+              <button
+                type="button"
+                disabled={selectedIsCommitted}
+                onClick={handleAddRelationship}
+              >
                 Add relationship
               </button>
             </p>
