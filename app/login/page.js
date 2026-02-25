@@ -7,7 +7,7 @@ export default function LoginPage() {
   const router = useRouter();
 
   function handleEnter() {
-    localStorage.setItem("temp_app_access", "1");
+    document.cookie = "temp_app_access=1; Path=/; Max-Age=86400; SameSite=Lax";
     router.replace("/app");
     router.refresh();
   }

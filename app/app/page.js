@@ -1,32 +1,22 @@
-"use client";
-
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import ExitButton from "./exit-button";
 
-export default function AppPage() {
-  const router = useRouter();
+export const dynamic = "force-dynamic";
 
-  if (typeof window === "undefined") {
-    return <main>Checking access...</main>;
-  }
-
-  const hasEntered = localStorage.getItem("temp_app_access") === "1";
+export default async function AppPage() {
+  const cookieStore = await cookies();
+  const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
 
   if (!hasEntered) {
-    router.replace("/login");
-    return <main>Redirecting to /login...</main>;
-  }
-
-  function handleExit() {
-    localStorage.removeItem("temp_app_access");
-    router.replace("/login");
-    router.refresh();
+    redirect("/login");
   }
 
   return (
     <main>
       <h1>App area (placeholder)</h1>
-      <button onClick={handleExit}>Exit</button>
+      <ExitButton />
       <nav>
         <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
         <Link href="/login">Login</Link>
