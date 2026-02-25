@@ -9,6 +9,7 @@ const STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
 const APP_VERSION = "local-draft-v1";
+const CURRENT_BUNDLE_SCHEMA_VERSION = "2";
 const AUDIT_ACTOR = "founder";
 const ALLOWED_TYPES = ["Decision", "Requirement", "Other"];
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
@@ -384,11 +385,11 @@ function loadDraftEdges(nodes) {
 
 function validateBundle(bundle) {
   if (!bundle || typeof bundle !== "object") {
-    return "Bundle must be a JSON object.";
+    return "Bundle must be a JSON object. Paste the full exported JSON bundle.";
   }
 
   if (!Object.prototype.hasOwnProperty.call(bundle, "metadata")) {
-    return "Missing field: metadata";
+    return "Missing field: metadata. Use an exported Venture OS bundle.";
   }
 
   if (!bundle.metadata || typeof bundle.metadata !== "object") {
@@ -396,31 +397,41 @@ function validateBundle(bundle) {
   }
 
   if (!Object.prototype.hasOwnProperty.call(bundle.metadata, "schemaVersion")) {
-    return "Missing field: metadata.schemaVersion";
+    return "Missing field: metadata.schemaVersion.";
   }
 
-  if (bundle.metadata.schemaVersion !== "1") {
-    return "Unsupported bundle version";
+  if (
+    bundle.metadata.schemaVersion !== "1" &&
+    bundle.metadata.schemaVersion !== "2"
+  ) {
+    return `Unsupported bundle version: ${bundle.metadata.schemaVersion}. Supported: 1, 2.`;
   }
 
   if (!Object.prototype.hasOwnProperty.call(bundle.metadata, "exportedAt")) {
-    return "Missing field: metadata.exportedAt";
+    return "Missing field: metadata.exportedAt.";
   }
 
   if (typeof bundle.metadata.exportedAt !== "string") {
-    return "Invalid field: metadata.exportedAt must be a string.";
+    return "Invalid field: metadata.exportedAt must be an ISO date string.";
   }
 
   if (!Object.prototype.hasOwnProperty.call(bundle.metadata, "appVersion")) {
-    return "Missing field: metadata.appVersion";
+    return "Missing field: metadata.appVersion.";
   }
 
   if (typeof bundle.metadata.appVersion !== "string") {
     return "Invalid field: metadata.appVersion must be a string.";
   }
 
+  if (
+    bundle.metadata.upgradeNotes !== undefined &&
+    typeof bundle.metadata.upgradeNotes !== "string"
+  ) {
+    return "Invalid field: metadata.upgradeNotes must be a string when present.";
+  }
+
   if (!Object.prototype.hasOwnProperty.call(bundle, "nodes")) {
-    return "Missing field: nodes";
+    return "Missing field: nodes.";
   }
 
   const nodeValidationError = validateImportPayload(bundle.nodes);
@@ -428,14 +439,19 @@ function validateBundle(bundle) {
     return `nodes: ${nodeValidationError}`;
   }
 
+  const schemaVersion = bundle.metadata.schemaVersion;
   const hasLegacyRelationships = Object.prototype.hasOwnProperty.call(
     bundle,
     "relationships"
   );
   const hasEdges = Object.prototype.hasOwnProperty.call(bundle, "edges");
 
-  if (!hasLegacyRelationships && !hasEdges) {
-    return "Missing field: relationships or edges";
+  if (schemaVersion === "2" && !hasEdges) {
+    return "Missing field: edges. Version 2 bundles require canonical edges.";
+  }
+
+  if (schemaVersion === "1" && !hasLegacyRelationships && !hasEdges) {
+    return "Missing field: relationships or edges. Version 1 import requires one of them.";
   }
 
   if (hasLegacyRelationships) {
@@ -477,7 +493,7 @@ function validateBundle(bundle) {
   }
 
   if (!Object.prototype.hasOwnProperty.call(bundle, "auditEvents")) {
-    return "Missing field: auditEvents";
+    return "Missing field: auditEvents.";
   }
 
   if (!Array.isArray(bundle.auditEvents)) {
@@ -498,6 +514,26 @@ function validateBundle(bundle) {
   }
 
   return null;
+}
+
+function buildCanonicalEdgesForImport(bundle, nodesById) {
+  const schemaVersion = bundle.metadata.schemaVersion;
+  const rawEdges =
+    schemaVersion === "2"
+      ? bundle.edges
+      : Array.isArray(bundle.edges)
+        ? bundle.edges
+        : Array.isArray(bundle.relationships)
+          ? bundle.relationships.map((rel) => ({
+              from: rel.sourceId,
+              to: rel.targetId,
+              relationshipType: rel.type,
+            }))
+          : [];
+
+  return rawEdges
+    .map((edge) => normalizeEdge(edge, nodesById))
+    .filter((edge) => edge !== null);
 }
 
 function validateImportPayload(payload) {
@@ -1072,9 +1108,11 @@ export default function NodesDraftClient() {
     const canonicalEdges = syncEdges(draftNodes, draftEdges);
     const bundle = {
       metadata: {
-        schemaVersion: "1",
+        schemaVersion: CURRENT_BUNDLE_SCHEMA_VERSION,
         exportedAt: new Date().toISOString(),
         appVersion: APP_VERSION,
+        upgradeNotes:
+          "Version 2 uses canonical edges as source of truth. relationships are included for backward compatibility.",
       },
       nodes: draftNodes,
       edges: canonicalEdges,
@@ -1116,20 +1154,7 @@ export default function NodesDraftClient() {
         .filter((node) => node !== null);
 
       const nodesById = new Map(normalizedNodes.map((node) => [node.id, node]));
-
-      const parsedEdges = Array.isArray(parsed.edges)
-        ? parsed.edges
-        : Array.isArray(parsed.relationships)
-          ? parsed.relationships.map((rel) => ({
-              from: rel.sourceId,
-              to: rel.targetId,
-              relationshipType: rel.type,
-            }))
-          : [];
-
-      const normalizedEdges = parsedEdges
-        .map((edge) => normalizeEdge(edge, nodesById))
-        .filter((edge) => edge !== null);
+      const normalizedEdges = buildCanonicalEdgesForImport(parsed, nodesById);
 
       const edgeVersioningError = validateCommittedEdgeVersioningOnImport(
         normalizedEdges,
