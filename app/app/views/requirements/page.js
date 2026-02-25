@@ -11,6 +11,7 @@ export default async function RequirementsViewPage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
   const scope = resolvedSearchParams?.scope === "committed" ? "committed" : "draft";
   const scopeQuery = scope === "committed" ? "?scope=committed" : "";
+  const modeLabel = scope === "committed" ? "Committed only" : "Draft";
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
 
@@ -20,8 +21,8 @@ export default async function RequirementsViewPage({ searchParams }) {
 
   return (
     <main>
-      <h1>Requirements Tree (Draft)</h1>
-      <p>Requirement nodes with related draft items.</p>
+      <h1>Requirements Tree ({modeLabel})</h1>
+      <p>Requirement nodes with related items in {modeLabel} mode.</p>
       <AppNav current="/app/views" />
       <ViewScopeToggle basePath="/app/views/requirements" scope={scope} />
       <ViewClientLoader mode="requirements" viewScope={scope} />

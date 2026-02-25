@@ -128,8 +128,10 @@ function buildRelationships(nodes, edges) {
         return {
           sourceId: source.id,
           sourceTitle: source.title,
+          sourceType: source.type,
           targetId: target.id,
           targetTitle: target.title,
+          targetType: target.type,
           type: edge.relationshipType,
         };
       })
@@ -147,8 +149,10 @@ function buildRelationships(nodes, edges) {
         return {
           sourceId: node.id,
           sourceTitle: node.title,
+          sourceType: node.type,
           targetId: relatedNode.id,
           targetTitle: relatedNode.title,
+          targetType: relatedNode.type,
           type: rel.type,
         };
       })
@@ -205,46 +209,84 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     return matchesTerm && matchesType;
   });
 
+  const relationshipsByType = useMemo(() => {
+    const grouped = new Map();
+
+    for (const relationship of filteredRelationships) {
+      if (!grouped.has(relationship.type)) {
+        grouped.set(relationship.type, []);
+      }
+
+      grouped.get(relationship.type).push(relationship);
+    }
+
+    return grouped;
+  }, [filteredRelationships]);
+
   function renderTree(nodes) {
     if (nodes.length === 0) {
       return (
         <EmptyState
-          title="No nodes available."
-          message="Load demo data or add draft nodes to populate this view."
+          title={`No ${mode} nodes available.`}
+          message={`Load demo data or add nodes to populate this ${viewScope} view.`}
         />
       );
     }
 
+    const relationshipTotal = nodes.reduce((count, node) => {
+      const related = relationshipsBySource.get(node.id) || [];
+      return count + related.length;
+    }, 0);
+
     return (
-      <ul>
-        {nodes.map((node) => {
-          const related = relationshipsBySource.get(node.id) || [];
+      <section>
+        <p>
+          Nodes: {nodes.length} | Relationships: {relationshipTotal}
+        </p>
+        <ul>
+          {nodes.map((node) => {
+            const related = relationshipsBySource.get(node.id) || [];
+            const relatedByType = related.reduce((grouped, item) => {
+              if (!grouped.has(item.type)) {
+                grouped.set(item.type, []);
+              }
+              grouped.get(item.type).push(item);
+              return grouped;
+            }, new Map());
 
-          return (
-            <li key={node.id}>
-              <strong>{node.title}</strong>
-              {related.length === 0 ? (
-                <p>No related items</p>
-              ) : (
-                <ul>
-                  {related.map((item, index) => {
-                    const targetNode = nodeById.get(item.targetId);
-                    if (!targetNode) {
-                      return null;
-                    }
+            return (
+              <li key={node.id}>
+                <strong>{node.title}</strong>
+                {related.length === 0 ? (
+                  <p>No related items</p>
+                ) : (
+                  <ul>
+                    {[...relatedByType.entries()].map(([type, typedItems]) => (
+                      <li key={`${node.id}-${type}`}>
+                        <strong>{type}</strong> ({typedItems.length})
+                        <ul>
+                          {typedItems.map((item, index) => {
+                            const targetNode = nodeById.get(item.targetId);
+                            if (!targetNode) {
+                              return null;
+                            }
 
-                    return (
-                      <li key={`${node.id}-${item.targetId}-${item.type}-${index}`}>
-                        {item.type}: {targetNode.title} ({targetNode.type})
+                            return (
+                              <li key={`${node.id}-${item.targetId}-${item.type}-${index}`}>
+                                {targetNode.title} ({targetNode.type})
+                              </li>
+                            );
+                          })}
+                        </ul>
                       </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
     );
   }
 
@@ -258,6 +300,9 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
 
   return (
     <section>
+      <p>
+        Nodes: {filteredNodes.length} | Relationships: {relationships.length}
+      </p>
       <SearchBox
         id="business-search"
         label="Filter by node"
@@ -281,16 +326,26 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       {filteredRelationships.length === 0 ? (
         <EmptyState
           title="No relationships found."
-          message="Add relationships in Nodes to populate the business view."
+          message={`No ${viewScope} relationships match this filter. Add relationships in Nodes or switch view mode.`}
         />
       ) : (
-        <ul>
-          {filteredRelationships.map((item, index) => (
-            <li key={`${item.sourceId}-${item.targetId}-${item.type}-${index}`}>
-              {item.sourceTitle} {"\u2014"}({item.type}){"\u2192"} {item.targetTitle}
-            </li>
+        <section>
+          {[...relationshipsByType.entries()].map(([type, items]) => (
+            <div key={type}>
+              <h3>
+                {type} ({items.length})
+              </h3>
+              <ul>
+                {items.map((item, index) => (
+                  <li key={`${item.sourceId}-${item.targetId}-${item.type}-${index}`}>
+                    {item.sourceTitle} ({item.sourceType}) {"\u2014"}({item.type}){"\u2192"}{" "}
+                    {item.targetTitle} ({item.targetType})
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </section>
       )}
     </section>
   );
