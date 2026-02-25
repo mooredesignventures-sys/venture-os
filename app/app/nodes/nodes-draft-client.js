@@ -11,7 +11,17 @@ const AUDIT_STORAGE_KEY = "draft_audit_log";
 const APP_VERSION = "local-draft-v1";
 const CURRENT_BUNDLE_SCHEMA_VERSION = "2";
 const AUDIT_ACTOR = "founder";
-const ALLOWED_TYPES = ["Decision", "Requirement", "Other"];
+const ALLOWED_TYPES = [
+  "Decision",
+  "Requirement",
+  "Product",
+  "Revenue",
+  "Asset",
+  "Task",
+  "KPI",
+  "Risk",
+  "Other",
+];
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 const STAGE_TYPES = ["proposed", "committed", "archived"];
 const WORK_STATUS_TYPES = ["queued", "in_progress", "review", "complete"];
@@ -551,7 +561,7 @@ function validateImportPayload(payload) {
     }
 
     if (!ALLOWED_TYPES.includes(item.type)) {
-      return "Each node type must be Decision, Requirement, or Other.";
+      return "Each node type must be one of: Decision, Requirement, Product, Revenue, Asset, Task, KPI, Risk, Other.";
     }
 
     if (
@@ -1260,6 +1270,12 @@ export default function NodesDraftClient() {
         >
           <option>Decision</option>
           <option>Requirement</option>
+          <option>Product</option>
+          <option>Revenue</option>
+          <option>Asset</option>
+          <option>Task</option>
+          <option>KPI</option>
+          <option>Risk</option>
           <option>Other</option>
         </select>
         <br />
@@ -1386,6 +1402,12 @@ export default function NodesDraftClient() {
           >
             <option>Decision</option>
             <option>Requirement</option>
+            <option>Product</option>
+            <option>Revenue</option>
+            <option>Asset</option>
+            <option>Task</option>
+            <option>KPI</option>
+            <option>Risk</option>
             <option>Other</option>
           </select>
 
