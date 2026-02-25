@@ -7,6 +7,94 @@ const AUDIT_STORAGE_KEY = "draft_audit_log";
 const ALLOWED_TYPES = ["Decision", "Requirement", "Other"];
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 const STATUS_TYPES = ["proposed", "committed", "archived"];
+const DEMO_NODES = [
+  {
+    id: "demo_decision_1",
+    title: "Adopt Quarterly Planning Cycle",
+    type: "Decision",
+    status: "committed",
+    createdAt: 1704067200000,
+    relationships: [
+      { targetId: "demo_req_1", type: "depends_on" },
+      { targetId: "demo_other_1", type: "enables" },
+    ],
+  },
+  {
+    id: "demo_decision_2",
+    title: "Launch SMB Pilot Program",
+    type: "Decision",
+    status: "proposed",
+    createdAt: 1704153600000,
+    relationships: [
+      { targetId: "demo_req_2", type: "depends_on" },
+      { targetId: "demo_other_2", type: "enables" },
+    ],
+  },
+  {
+    id: "demo_decision_3",
+    title: "Prioritize Churn Reduction",
+    type: "Decision",
+    status: "proposed",
+    createdAt: 1704240000000,
+    relationships: [{ targetId: "demo_req_3", type: "depends_on" }],
+  },
+  {
+    id: "demo_req_1",
+    title: "Document planning inputs",
+    type: "Requirement",
+    status: "proposed",
+    createdAt: 1704326400000,
+    relationships: [{ targetId: "demo_other_3", type: "relates_to" }],
+  },
+  {
+    id: "demo_req_2",
+    title: "Define pilot success metrics",
+    type: "Requirement",
+    status: "proposed",
+    createdAt: 1704412800000,
+    relationships: [{ targetId: "demo_other_4", type: "depends_on" }],
+  },
+  {
+    id: "demo_req_3",
+    title: "Set retention baseline dashboard",
+    type: "Requirement",
+    status: "proposed",
+    createdAt: 1704499200000,
+    relationships: [{ targetId: "demo_other_2", type: "enables" }],
+  },
+  {
+    id: "demo_other_1",
+    title: "Planning review ritual",
+    type: "Other",
+    status: "proposed",
+    createdAt: 1704585600000,
+    relationships: [{ targetId: "demo_other_3", type: "relates_to" }],
+  },
+  {
+    id: "demo_other_2",
+    title: "Pilot customer segment list",
+    type: "Other",
+    status: "proposed",
+    createdAt: 1704672000000,
+    relationships: [{ targetId: "demo_other_4", type: "relates_to" }],
+  },
+  {
+    id: "demo_other_3",
+    title: "Cross-team dependency map",
+    type: "Other",
+    status: "proposed",
+    createdAt: 1704758400000,
+    relationships: [],
+  },
+  {
+    id: "demo_other_4",
+    title: "Retention dashboard checklist",
+    type: "Other",
+    status: "proposed",
+    createdAt: 1704844800000,
+    relationships: [],
+  },
+];
 
 function createNodeId() {
   return `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -125,6 +213,10 @@ function appendAuditEntry(entry) {
   const currentEntries = loadAuditEntries();
   const nextEntries = [...currentEntries, entry];
   window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(nextEntries));
+}
+
+function clearAuditEntries() {
+  window.localStorage.removeItem(AUDIT_STORAGE_KEY);
 }
 
 function validateImportPayload(payload) {
@@ -371,6 +463,23 @@ export default function NodesDraftClient() {
     }
   }
 
+  function handleLoadDemoData() {
+    const demoNodes = DEMO_NODES.map((node) => ({ ...node }));
+    saveDraftNodes(demoNodes);
+    clearAuditEntries();
+    setSelectedId(null);
+    setImportText("");
+    setImportError("");
+  }
+
+  function handleResetDemoData() {
+    saveDraftNodes([]);
+    clearAuditEntries();
+    setSelectedId(null);
+    setImportText("");
+    setImportError("");
+  }
+
   const relationshipTargetOptions = draftNodes.filter(
     (node) => node.status !== "archived" && node.id !== selectedId
   );
@@ -383,6 +492,15 @@ export default function NodesDraftClient() {
 
   return (
     <section>
+      <p>
+        <button type="button" onClick={handleLoadDemoData}>
+          Load Demo Data
+        </button>{" "}
+        <button type="button" onClick={handleResetDemoData}>
+          Reset (clear all local data)
+        </button>
+      </p>
+
       <form onSubmit={handleAddNode}>
         <label htmlFor="node-title">Title</label>
         <br />
