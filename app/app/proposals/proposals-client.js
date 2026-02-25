@@ -3,9 +3,30 @@
 import { useState } from "react";
 
 const TEMPLATES = {
-  decision: `Proposal Type: Decision\nTitle:\nRationale:\nSuccess criteria:\nRisks:\n`,
-  requirement: `Proposal Type: Requirement\nTitle:\nRationale:\nSuccess criteria:\nRisks:\n`,
-  kpi: `Proposal Type: KPI\nTitle:\nRationale:\nSuccess criteria:\nRisks:\n`,
+  decision: `Proposal Type: Decision
+Title:
+Rationale:
+Assumptions:
+Success criteria:
+Risks:
+Next steps:
+`,
+  requirement: `Proposal Type: Requirement
+Title:
+Rationale:
+Assumptions:
+Success criteria:
+Risks:
+Next steps:
+`,
+  kpi: `Proposal Type: KPI
+Title:
+Rationale:
+Assumptions:
+Success criteria:
+Risks:
+Next steps:
+`,
 };
 
 export default function ProposalsClient() {
@@ -30,6 +51,11 @@ export default function ProposalsClient() {
     }
   }
 
+  function clearText() {
+    setText("");
+    setCopyMessage("");
+  }
+
   return (
     <section>
       <p>
@@ -47,7 +73,10 @@ export default function ProposalsClient() {
       <textarea value={text} readOnly rows={12} cols={70} />
       <br />
       <button type="button" onClick={copyText}>
-        Copy
+        Copy to clipboard
+      </button>{" "}
+      <button type="button" onClick={clearText}>
+        Clear
       </button>
       {copyMessage ? <p>{copyMessage}</p> : null}
     </section>
