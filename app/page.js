@@ -5,7 +5,8 @@ export default function Home() {
     <main>
       <h1>{"Venture OS \u2014 Foundation Setup"}</h1>
       <nav>
-        <Link href="/">Home</Link> | <Link href="/app">App area</Link>
+        <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
+        <Link href="/login">Login</Link>
       </nav>
     </main>
   );
