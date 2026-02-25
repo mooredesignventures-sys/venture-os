@@ -15,7 +15,7 @@ export default function LoginPage() {
   return (
     <main>
       <h1>Login</h1>
-      <p>Temporary gate only; replace with real auth later.</p>
+      <p>{"Temporary gate \u2014 will be replaced after Master Spec update"}</p>
       <button onClick={handleEnter}>Enter (temporary)</button>
       <nav>
         <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
