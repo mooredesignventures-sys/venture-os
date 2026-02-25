@@ -245,16 +245,40 @@ function validateBundle(bundle) {
     return "Bundle must be a JSON object.";
   }
 
+  if (!Object.prototype.hasOwnProperty.call(bundle, "metadata")) {
+    return "Missing field: metadata";
+  }
+
   if (!bundle.metadata || typeof bundle.metadata !== "object") {
-    return "Bundle metadata is missing.";
+    return "Invalid field: metadata must be an object.";
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(bundle.metadata, "schemaVersion")) {
+    return "Missing field: metadata.schemaVersion";
+  }
+
+  if (bundle.metadata.schemaVersion !== "1") {
+    return "Unsupported bundle version";
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(bundle.metadata, "exportedAt")) {
+    return "Missing field: metadata.exportedAt";
   }
 
   if (typeof bundle.metadata.exportedAt !== "string") {
-    return "metadata.exportedAt must be a string.";
+    return "Invalid field: metadata.exportedAt must be a string.";
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(bundle.metadata, "appVersion")) {
+    return "Missing field: metadata.appVersion";
   }
 
   if (typeof bundle.metadata.appVersion !== "string") {
-    return "metadata.appVersion must be a string.";
+    return "Invalid field: metadata.appVersion must be a string.";
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(bundle, "nodes")) {
+    return "Missing field: nodes";
   }
 
   const nodeValidationError = validateImportPayload(bundle.nodes);
@@ -262,8 +286,12 @@ function validateBundle(bundle) {
     return `nodes: ${nodeValidationError}`;
   }
 
+  if (!Object.prototype.hasOwnProperty.call(bundle, "relationships")) {
+    return "Missing field: relationships";
+  }
+
   if (!Array.isArray(bundle.relationships)) {
-    return "relationships must be an array.";
+    return "Invalid field: relationships must be an array.";
   }
 
   const invalidRelationship = bundle.relationships.some(
@@ -279,8 +307,12 @@ function validateBundle(bundle) {
     return "Each relationship must include sourceId, targetId, and a valid type.";
   }
 
+  if (!Object.prototype.hasOwnProperty.call(bundle, "auditEvents")) {
+    return "Missing field: auditEvents";
+  }
+
   if (!Array.isArray(bundle.auditEvents)) {
-    return "auditEvents must be an array.";
+    return "Invalid field: auditEvents must be an array.";
   }
 
   const invalidAuditEvent = bundle.auditEvents.some(
@@ -566,6 +598,7 @@ export default function NodesDraftClient() {
   function handleExportBundle() {
     const bundle = {
       metadata: {
+        schemaVersion: "1",
         exportedAt: new Date().toISOString(),
         appVersion: APP_VERSION,
       },
