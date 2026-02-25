@@ -888,6 +888,8 @@ export default function NodesDraftClient() {
   const [dryRunMessage, setDryRunMessage] = useState("");
   const [dryRunDetails, setDryRunDetails] = useState([]);
   const [previewDiff, setPreviewDiff] = useState(null);
+  const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
+  const [diagnosticsDetails, setDiagnosticsDetails] = useState([]);
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState("");
   const [relationshipTargetId, setRelationshipTargetId] = useState("");
@@ -905,6 +907,30 @@ export default function NodesDraftClient() {
     () => new Map(draftNodes.map((node) => [node.id, node])),
     [draftNodes]
   );
+  const committedNodeCount = useMemo(
+    () => draftNodes.filter((node) => normalizeStatus(node) === "committed").length,
+    [draftNodes]
+  );
+  const committedEdgeCount = useMemo(() => {
+    const committedNodeIds = new Set(
+      draftNodes
+        .filter((node) => normalizeStatus(node) === "committed")
+        .map((node) => node.id)
+    );
+
+    return draftEdges.filter(
+      (edge) =>
+        edge.stage === "committed" &&
+        committedNodeIds.has(edge.from) &&
+        committedNodeIds.has(edge.to)
+    ).length;
+  }, [draftNodes, draftEdges]);
+  const auditEntries = loadAuditEntries();
+  const lastAuditTimestamp =
+    auditEntries.length > 0 &&
+    typeof auditEntries[auditEntries.length - 1]?.timestamp === "string"
+      ? auditEntries[auditEntries.length - 1].timestamp
+      : null;
 
   function syncEdges(nextNodes, currentEdges) {
     const nextNodeById = new Map(nextNodes.map((node) => [node.id, node]));
@@ -1359,6 +1385,29 @@ export default function NodesDraftClient() {
     }
   }
 
+  function handleRunDiagnostics() {
+    const failures = [];
+
+    const importValidationError = validateImportPayload(draftNodes);
+    if (importValidationError) {
+      failures.push(`Node payload check failed: ${importValidationError}`);
+    }
+
+    const committedGraphError = validateCommittedGraphIntegrity(draftNodes, draftEdges);
+    if (committedGraphError) {
+      failures.push(`Committed graph check failed: ${committedGraphError}`);
+    }
+
+    if (failures.length > 0) {
+      setDiagnosticsMessage("Diagnostics failed.");
+      setDiagnosticsDetails(failures.slice(0, 5));
+      return;
+    }
+
+    setDiagnosticsMessage("Diagnostics passed. No invariant issues found.");
+    setDiagnosticsDetails(["Report-only check complete. No local data was changed."]);
+  }
+
   const relationshipTargetOptions = draftNodes.filter(
     (node) => normalizeStatus(node) !== "archived" && node.id !== selectedId
   );
@@ -1448,6 +1497,29 @@ export default function NodesDraftClient() {
           ) : null}
         </section>
       ) : null}
+      <section>
+        <h3>Diagnostics</h3>
+        <p>Supported bundle schema versions: 1, 2</p>
+        <p>
+          Nodes: {draftNodes.length} | Edges: {draftEdges.length} | Committed nodes:{" "}
+          {committedNodeCount} | Committed edges: {committedEdgeCount}
+        </p>
+        <p>
+          Last audit event:{" "}
+          {lastAuditTimestamp ? lastAuditTimestamp : "No audit events recorded."}
+        </p>
+        <button type="button" onClick={handleRunDiagnostics}>
+          Run invariant checks (report-only)
+        </button>
+        {diagnosticsMessage ? <p>{diagnosticsMessage}</p> : null}
+        {diagnosticsDetails.length > 0 ? (
+          <ul>
+            {diagnosticsDetails.map((detail) => (
+              <li key={detail}>{detail}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
 
       <form onSubmit={handleAddNode}>
         <label htmlFor="node-title">Title</label>
