@@ -11,6 +11,7 @@ export default async function DecisionsViewPage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
   const scope = resolvedSearchParams?.scope === "committed" ? "committed" : "draft";
   const scopeQuery = scope === "committed" ? "?scope=committed" : "";
+  const modeLabel = scope === "committed" ? "Committed only" : "Draft";
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
 
@@ -20,8 +21,8 @@ export default async function DecisionsViewPage({ searchParams }) {
 
   return (
     <main>
-      <h1>Decision Tree (Draft)</h1>
-      <p>Decision nodes with related draft items.</p>
+      <h1>Decision Tree ({modeLabel})</h1>
+      <p>Decision nodes with related items in {modeLabel} mode.</p>
       <AppNav current="/app/views" />
       <ViewScopeToggle basePath="/app/views/decisions" scope={scope} />
       <ViewClientLoader mode="decisions" viewScope={scope} />

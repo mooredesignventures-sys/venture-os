@@ -10,6 +10,7 @@ export default async function ViewsPage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
   const scope = resolvedSearchParams?.scope === "committed" ? "committed" : "draft";
   const scopeQuery = scope === "committed" ? "?scope=committed" : "";
+  const modeLabel = scope === "committed" ? "Committed only" : "Draft";
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
 
@@ -19,8 +20,8 @@ export default async function ViewsPage({ searchParams }) {
 
   return (
     <main>
-      <h1>Views (Draft)</h1>
-      <p>Review decision, requirement, and relationship snapshots.</p>
+      <h1>Views ({modeLabel})</h1>
+      <p>Review decision, requirement, and relationship snapshots in {modeLabel} mode.</p>
       <AppNav current="/app/views" />
       <ViewScopeToggle basePath="/app/views" scope={scope} />
       <ul>
