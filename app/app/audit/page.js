@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import AuditClient from "./audit-client";
+import AppNav from "../../../src/components/app-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,8 @@ export default async function AuditPage() {
   return (
     <main>
       <h1>Audit (Draft, Local)</h1>
+      <p>Local audit events for draft commit actions.</p>
+      <AppNav current="/app/audit" />
       <AuditClient />
       <nav>
         <Link href="/app">App area</Link> | <Link href="/app/nodes">Nodes</Link>

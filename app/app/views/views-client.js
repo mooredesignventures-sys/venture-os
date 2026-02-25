@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import EmptyState from "../../../src/components/ui/empty-state";
+import SearchBox from "../../../src/components/ui/search-box";
+import SelectFilter from "../../../src/components/ui/select-filter";
 
 const STORAGE_KEY = "draft_nodes";
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
@@ -120,7 +123,12 @@ export default function ViewsClient({ mode }) {
 
   function renderTree(nodes) {
     if (nodes.length === 0) {
-      return <p>No nodes available.</p>;
+      return (
+        <EmptyState
+          title="No nodes available."
+          message="Load demo data or add draft nodes to populate this view."
+        />
+      );
     }
 
     return (
@@ -161,29 +169,31 @@ export default function ViewsClient({ mode }) {
 
   return (
     <section>
-      <label htmlFor="business-search">Filter by node</label>
-      <br />
-      <input
+      <SearchBox
         id="business-search"
+        label="Filter by node"
         value={search}
-        onChange={(event) => setSearch(event.target.value)}
+        onChange={setSearch}
       />
       <br />
-      <label htmlFor="relationship-type-filter">Filter by relationship type</label>
-      <br />
-      <select
+      <SelectFilter
         id="relationship-type-filter"
+        label="Filter by relationship type"
         value={relationshipTypeFilter}
-        onChange={(event) => setRelationshipTypeFilter(event.target.value)}
-      >
-        <option value="all">all</option>
-        <option value="depends_on">depends_on</option>
-        <option value="enables">enables</option>
-        <option value="relates_to">relates_to</option>
-      </select>
+        onChange={setRelationshipTypeFilter}
+        options={[
+          { value: "all", label: "all" },
+          { value: "depends_on", label: "depends_on" },
+          { value: "enables", label: "enables" },
+          { value: "relates_to", label: "relates_to" },
+        ]}
+      />
 
       {filteredRelationships.length === 0 ? (
-        <p>No relationships found.</p>
+        <EmptyState
+          title="No relationships found."
+          message="Add relationships in Nodes to populate the business view."
+        />
       ) : (
         <ul>
           {filteredRelationships.map((item, index) => (

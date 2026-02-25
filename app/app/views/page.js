@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import AppNav from "../../../src/components/app-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,8 @@ export default async function ViewsPage() {
   return (
     <main>
       <h1>Views (Draft)</h1>
+      <p>Review decision, requirement, and relationship snapshots.</p>
+      <AppNav current="/app/views" />
       <ul>
         <li>
           <Link href="/app/views/decisions">Decision Tree</Link>
@@ -26,9 +29,6 @@ export default async function ViewsPage() {
           <Link href="/app/views/business">Business Graph</Link>
         </li>
       </ul>
-      <nav>
-        <Link href="/app">App area</Link> | <Link href="/app/nodes">Nodes</Link>
-      </nav>
     </main>
   );
 }
