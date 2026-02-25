@@ -1,6 +1,8 @@
 # AGENTS.md
 
-- Work via PRs only.
-- Keep changes small and safe.
-- If unsure, ask ONE question.
-- Do not add new libraries without asking first.
+- PR mode only (never commit to `main`).
+- No new dependencies unless you ask first.
+- No unrelated refactors and no formatting sweeps.
+- Always run build/test/lint if available and paste outputs in PR description.
+- If blocked or unclear, ask ONE question only.
+- Keep changes minimal and reviewable.
