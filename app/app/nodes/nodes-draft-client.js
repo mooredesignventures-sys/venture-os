@@ -929,7 +929,7 @@ function toDisplayItems(items, maxItems = 20) {
   return [...items.slice(0, maxItems), `+${items.length - maxItems} more`];
 }
 
-export default function NodesDraftClient() {
+export default function NodesDraftClient({ isFounder = false }) {
   const initialNodes = loadDraftNodes();
   const initialEdges = loadDraftEdges(initialNodes);
   const [title, setTitle] = useState("");
@@ -956,6 +956,7 @@ export default function NodesDraftClient() {
   const [relationshipError, setRelationshipError] = useState("");
   const [commitConfirmText, setCommitConfirmText] = useState("");
   const [commitError, setCommitError] = useState("");
+  const [actionError, setActionError] = useState("");
 
   const selectedNode = draftNodes.find((node) => node.id === selectedId) || null;
   const selectedStage = selectedNode ? normalizeStatus(selectedNode) : null;
@@ -1153,6 +1154,11 @@ export default function NodesDraftClient() {
       return;
     }
 
+    if (!isFounder) {
+      setCommitError("Founder only.");
+      return;
+    }
+
     if (commitConfirmText !== COMMIT_CONFIRM_TEXT) {
       setCommitError("Type CONFIRMED before committing.");
       return;
@@ -1190,6 +1196,16 @@ export default function NodesDraftClient() {
 
   function handleArchiveSelected() {
     if (!selectedNode || selectedStage === "archived") {
+      return;
+    }
+
+    if (!isFounder) {
+      setCommitError("Founder only.");
+      return;
+    }
+
+    if (commitConfirmText !== COMMIT_CONFIRM_TEXT) {
+      setCommitError("Type CONFIRMED before archiving.");
       return;
     }
 
@@ -1304,6 +1320,16 @@ export default function NodesDraftClient() {
   }
 
   function handleLoadDemoData() {
+    if (!isFounder) {
+      setActionError("Founder only.");
+      return;
+    }
+
+    if (commitConfirmText !== COMMIT_CONFIRM_TEXT) {
+      setActionError("Type CONFIRMED before loading demo data.");
+      return;
+    }
+
     const demoNodes = DEMO_NODES.map((node) => normalizeNode(node)).filter(
       (node) => node !== null
     );
@@ -1316,9 +1342,20 @@ export default function NodesDraftClient() {
     setRelationshipError("");
     setCommitConfirmText("");
     setCommitError("");
+    setActionError("");
   }
 
   function handleResetDemoData() {
+    if (!isFounder) {
+      setActionError("Founder only.");
+      return;
+    }
+
+    if (commitConfirmText !== COMMIT_CONFIRM_TEXT) {
+      setActionError("Type CONFIRMED before resetting demo data.");
+      return;
+    }
+
     saveDraftNodes([]);
     clearAuditEntries();
     setSelectedId(null);
@@ -1328,6 +1365,7 @@ export default function NodesDraftClient() {
     setRelationshipError("");
     setCommitConfirmText("");
     setCommitError("");
+    setActionError("");
   }
 
   function handleExportBundle() {
@@ -1427,6 +1465,16 @@ export default function NodesDraftClient() {
   }
 
   function handleImportBundle() {
+    if (!isFounder) {
+      setActionError("Founder only.");
+      return;
+    }
+
+    if (commitConfirmText !== COMMIT_CONFIRM_TEXT) {
+      setActionError("Type CONFIRMED before importing bundle.");
+      return;
+    }
+
     setBundleMessage("");
 
     try {
@@ -1477,6 +1525,7 @@ export default function NodesDraftClient() {
       setRelationshipError("");
       setCommitConfirmText("");
       setCommitError("");
+      setActionError("");
       setBundleMessage("Bundle imported successfully.");
     } catch {
       setBundleMessage("Import failed: Invalid JSON.");
@@ -1518,11 +1567,28 @@ export default function NodesDraftClient() {
 
   return (
     <section>
+      <p className="vo-meta">
+        Founder mode: <strong>{isFounder ? "Active" : "Read-only"}</strong>
+      </p>
       <p>
-        <button type="button" onClick={handleLoadDemoData}>
+        <label htmlFor="privileged-confirmed">Type CONFIRMED for privileged actions</label>
+        <br />
+        <input
+          id="privileged-confirmed"
+          value={commitConfirmText}
+          onChange={(event) => {
+            setCommitConfirmText(event.target.value);
+            setCommitError("");
+            setActionError("");
+          }}
+        />
+      </p>
+      {actionError ? <p>{actionError}</p> : null}
+      <p>
+        <button type="button" onClick={handleLoadDemoData} disabled={!isFounder}>
           Load Demo Data
         </button>{" "}
-        <button type="button" onClick={handleResetDemoData}>
+        <button type="button" onClick={handleResetDemoData} disabled={!isFounder}>
           Reset (clear all local data)
         </button>
       </p>
@@ -1536,7 +1602,7 @@ export default function NodesDraftClient() {
         <button type="button" onClick={handleValidateBundleDryRun}>
           Validate Bundle (dry run)
         </button>{" "}
-        <button type="button" onClick={handleImportBundle}>
+        <button type="button" onClick={handleImportBundle} disabled={!isFounder}>
           Import Bundle
         </button>
       </p>
@@ -1792,14 +1858,14 @@ export default function NodesDraftClient() {
             <button
               type="button"
               onClick={handleCommitSelected}
-              disabled={selectedStage !== "proposed"}
+              disabled={selectedStage !== "proposed" || !isFounder}
             >
               Commit
             </button>{" "}
             <button
               type="button"
               onClick={handleArchiveSelected}
-              disabled={selectedIsArchived}
+              disabled={selectedIsArchived || !isFounder}
             >
               Archive
             </button>
