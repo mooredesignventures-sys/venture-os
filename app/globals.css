@@ -51,6 +51,13 @@ a {
   border: 1px solid var(--vo-border);
   border-radius: 1rem;
   box-shadow: var(--vo-shadow);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.vo-surface:hover {
+  border-color: #5b2323;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.42);
 }
 
 .vo-title {
@@ -258,4 +265,72 @@ ol {
 
 .status-badge--committed {
   border-color: rgba(245, 158, 11, 0.65);
+}
+
+.nodes-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.nodes-hero-left {
+  grid-column: span 3;
+}
+
+.nodes-hero-main {
+  grid-column: span 6;
+}
+
+.nodes-hero-right {
+  grid-column: span 3;
+}
+
+.nodes-workspace > section {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.nodes-workspace h2 {
+  margin-bottom: 0.1rem;
+}
+
+.nodes-workspace h3 {
+  color: #ffdbc5;
+  font-size: 0.86rem;
+  letter-spacing: 0.02em;
+}
+
+.nodes-workspace p:has(> button) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.nodes-workspace button:hover {
+  border-color: #8a3232;
+}
+
+.nodes-workspace label[for="commit-confirmed"] {
+  color: #ffd7bb;
+  font-weight: 600;
+}
+
+#commit-confirmed {
+  border-color: rgba(245, 158, 11, 0.62);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.07), rgba(17, 17, 17, 0.98));
+  box-shadow: inset 0 0 0 1px rgba(204, 43, 43, 0.22);
+}
+
+#commit-confirmed:focus-visible {
+  outline-color: rgba(245, 158, 11, 0.45);
+  border-color: var(--vo-accent-amber);
+}
+
+@media (max-width: 1080px) {
+  .nodes-hero-left,
+  .nodes-hero-main,
+  .nodes-hero-right {
+    grid-column: span 12;
+  }
 }
