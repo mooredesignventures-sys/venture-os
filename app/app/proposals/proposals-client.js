@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const NODE_STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
@@ -282,13 +282,20 @@ function buildExecutionPack(graph) {
 }
 
 export default function ProposalsClient() {
+  const [graph, setGraph] = useState(null);
   const [text, setText] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
   const [selectedDecisionId, setSelectedDecisionId] = useState("");
-  const graph = getCommittedGraph();
   const committedDecisions = graph.committedNodes.filter(
     (node) => node.type === "Decision"
   );
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setGraph(getCommittedGraph());
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   function generate(templateKey) {
     setText(TEMPLATES[templateKey]);
@@ -336,6 +343,14 @@ export default function ProposalsClient() {
     link.click();
     URL.revokeObjectURL(url);
     setCopyMessage("Downloaded.");
+  }
+
+  if (!graph) {
+    return (
+      <section>
+        <p>Loading proposals...</p>
+      </section>
+    );
   }
 
   return (
