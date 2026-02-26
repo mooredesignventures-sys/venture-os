@@ -239,11 +239,11 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     }, 0);
 
     return (
-      <section>
-        <p>
+      <section className="views-tree">
+        <p className="vo-meta">
           Nodes: {nodes.length} | Relationships: {relationshipTotal}
         </p>
-        <ul>
+        <ul className="views-tree__list">
           {nodes.map((node) => {
             const related = relationshipsBySource.get(node.id) || [];
             const relatedByType = related.reduce((grouped, item) => {
@@ -255,16 +255,16 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
             }, new Map());
 
             return (
-              <li key={node.id}>
+              <li key={node.id} className="views-tree__item">
                 <strong>{node.title}</strong>
                 {related.length === 0 ? (
-                  <p>No related items</p>
+                  <p className="vo-meta">No related items</p>
                 ) : (
-                  <ul>
+                  <ul className="views-tree__type-list">
                     {[...relatedByType.entries()].map(([type, typedItems]) => (
-                      <li key={`${node.id}-${type}`}>
+                      <li key={`${node.id}-${type}`} className="views-tree__type-item">
                         <strong>{type}</strong> ({typedItems.length})
-                        <ul>
+                        <ul className="views-tree__target-list">
                           {typedItems.map((item, index) => {
                             const targetNode = nodeById.get(item.targetId);
                             if (!targetNode) {
@@ -299,29 +299,30 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   }
 
   return (
-    <section>
-      <p>
+    <section className="views-relationships">
+      <p className="vo-meta">
         Nodes: {filteredNodes.length} | Relationships: {relationships.length}
       </p>
-      <SearchBox
-        id="business-search"
-        label="Filter by node"
-        value={search}
-        onChange={setSearch}
-      />
-      <br />
-      <SelectFilter
-        id="relationship-type-filter"
-        label="Filter by relationship type"
-        value={relationshipTypeFilter}
-        onChange={setRelationshipTypeFilter}
-        options={[
-          { value: "all", label: "all" },
-          { value: "depends_on", label: "depends_on" },
-          { value: "enables", label: "enables" },
-          { value: "relates_to", label: "relates_to" },
-        ]}
-      />
+      <div className="filters-grid">
+        <SearchBox
+          id="business-search"
+          label="Filter by node"
+          value={search}
+          onChange={setSearch}
+        />
+        <SelectFilter
+          id="relationship-type-filter"
+          label="Filter by relationship type"
+          value={relationshipTypeFilter}
+          onChange={setRelationshipTypeFilter}
+          options={[
+            { value: "all", label: "all" },
+            { value: "depends_on", label: "depends_on" },
+            { value: "enables", label: "enables" },
+            { value: "relates_to", label: "relates_to" },
+          ]}
+        />
+      </div>
 
       {filteredRelationships.length === 0 ? (
         <EmptyState
@@ -329,13 +330,13 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
           message={`No ${viewScope} relationships match this filter. Add relationships in Nodes or switch view mode.`}
         />
       ) : (
-        <section>
+        <section className="views-relationships__groups">
           {[...relationshipsByType.entries()].map(([type, items]) => (
-            <div key={type}>
+            <div key={type} className="views-relationships__group">
               <h3>
                 {type} ({items.length})
               </h3>
-              <ul>
+              <ul className="views-relationships__list">
                 {items.map((item, index) => (
                   <li key={`${item.sourceId}-${item.targetId}-${item.type}-${index}`}>
                     {item.sourceTitle} ({item.sourceType}) {"\u2014"}({item.type}){"\u2192"}{" "}

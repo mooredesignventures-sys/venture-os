@@ -5,6 +5,7 @@ import NodesDraftClientLoader from "./nodes-draft-client-loader";
 import AppNav from "../../../src/components/app-nav";
 import AppShell from "../../../src/components/ui/app-shell";
 import Card from "../../../src/components/ui/card";
+import PageHeader from "../../../src/components/ui/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,18 @@ export default async function NodesPage() {
   return (
     <AppShell
       grid
-      title="Nodes (Draft)"
-      description="War-room node staging, relationships, and commit controls."
+      header={
+        <PageHeader
+          title="Nodes (Draft)"
+          meta="War-room node staging, relationships, and commit controls."
+          actions={
+            <>
+              <Link href="/app/views">Views</Link>
+              <Link href="/app/audit">Audit</Link>
+            </>
+          }
+        />
+      }
     >
       <div className="nodes-hero-grid">
         <section className="nodes-hero-left">

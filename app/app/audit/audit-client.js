@@ -100,9 +100,42 @@ export default function AuditClient() {
 
   if (ordered.length === 0) {
     return (
-      <>
-        <SearchBox id="audit-search" label="Search audit events" value={search} onChange={setSearch} />
-        <br />
+      <section className="audit-feed">
+        <div className="filters-grid">
+          <SearchBox
+            id="audit-search"
+            label="Search audit events"
+            value={search}
+            onChange={setSearch}
+          />
+          <SelectFilter
+            id="audit-event-type"
+            label="Event type"
+            value={eventTypeFilter}
+            onChange={setEventTypeFilter}
+            options={eventTypeOptions}
+          />
+        </div>
+        <EmptyState
+          title="No audit entries match the current filters."
+          message="Adjust search or event type filters to see matching entries."
+        />
+      </section>
+    );
+  }
+
+  return (
+    <section className="audit-feed">
+      <p className="vo-meta">
+        Showing {ordered.length} of {entries.length} audit events.
+      </p>
+      <div className="filters-grid">
+        <SearchBox
+          id="audit-search"
+          label="Search audit events"
+          value={search}
+          onChange={setSearch}
+        />
         <SelectFilter
           id="audit-event-type"
           label="Event type"
@@ -110,33 +143,19 @@ export default function AuditClient() {
           onChange={setEventTypeFilter}
           options={eventTypeOptions}
         />
-        <EmptyState
-          title="No audit entries match the current filters."
-          message="Adjust search or event type filters to see matching entries."
-        />
-      </>
-    );
-  }
-
-  return (
-    <>
-      <SearchBox id="audit-search" label="Search audit events" value={search} onChange={setSearch} />
-      <br />
-      <SelectFilter
-        id="audit-event-type"
-        label="Event type"
-        value={eventTypeFilter}
-        onChange={setEventTypeFilter}
-        options={eventTypeOptions}
-      />
-      <ul>
+      </div>
+      <ul className="audit-feed__list">
         {ordered.map((entry, index) => (
           <li key={`${entry.timestamp}-${entry.nodeId}-${entry.edgeId}-${index}`}>
-            {entry.timestamp} | {entry.eventType} | {entry.actor} | node:{" "}
-            {entry.nodeId || "-"} | edge: {entry.edgeId || "-"} | {entry.nodeTitle || "-"}
+            <span>{entry.timestamp}</span>
+            <span>{entry.eventType}</span>
+            <span>{entry.actor}</span>
+            <span>node: {entry.nodeId || "-"}</span>
+            <span>edge: {entry.edgeId || "-"}</span>
+            <span>{entry.nodeTitle || "-"}</span>
           </li>
         ))}
       </ul>
-    </>
+    </section>
   );
 }

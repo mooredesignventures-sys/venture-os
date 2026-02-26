@@ -21,18 +21,19 @@ export default function BrainstormClient() {
   }
 
   return (
-    <section>
+    <section className="brainstorm-layout">
+      <p className="vo-meta">
+        Draft output only. Generated entries remain proposed until human review and commit.
+      </p>
       <label htmlFor="brainstorm-idea">Brainstorm idea</label>
-      <br />
       <textarea
         id="brainstorm-idea"
         rows={6}
         value={idea}
         onChange={(event) => setIdea(event.target.value)}
-        className="vo-input"
-        style={{ width: "100%" }}
+        className="vo-input brainstorm-layout__input"
       />
-      <p>
+      <p className="brainstorm-layout__actions">
         <button type="button" className="vo-btn-primary" onClick={handleGeneratePreview}>
           Generate Draft
         </button>{" "}
@@ -43,10 +44,10 @@ export default function BrainstormClient() {
       {preview.length === 0 ? (
         <p className="vo-meta">No generated draft yet.</p>
       ) : (
-        <ul>
+        <ul className="plain-list">
           {preview.map((item, index) => (
             <li key={`${item.type}-${index}`}>
-              {item.type}: {item.title}
+              <span className="status-badge">{item.type}</span> {item.title}
             </li>
           ))}
         </ul>

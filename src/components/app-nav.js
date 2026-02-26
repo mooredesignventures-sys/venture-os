@@ -40,15 +40,17 @@ export default function AppNav({ current }) {
 
   return (
     <nav className="app-nav">
-      {NAV_ITEMS.map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          className={`app-nav__item${current === item.href ? " app-nav__item--active" : ""}`}
-        >
-          {item.label}
-        </Link>
-      ))}
+      <div className="app-nav__items">
+        {NAV_ITEMS.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`app-nav__item${current === item.href ? " app-nav__item--active" : ""}`}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </div>
       <button type="button" className="theme-toggle vo-btn-outline" onClick={handleThemeToggle}>
         Toggle theme
       </button>
