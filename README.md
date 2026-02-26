@@ -14,13 +14,32 @@ npm run dev:safe
 Open: `http://localhost:3000` (or the printed fallback URL, commonly `http://localhost:3001`).
 
 ## Windows Stability
-- Preferred install recovery: `npm run install:clean`
-- Preferred dev startup: `npm run dev:safe`
-- On Windows, `dev:safe` defaults to webpack mode for reliability.
-- Turbopack is opt-in on Windows:
+Why EPERM happens on Windows:
+- Native `.node` modules (for example `lightningcss.win32-x64-msvc.node`) can be mapped/locked by active processes.
+- If `npm ci` tries to unlink while mapped, Windows returns `EPERM: operation not permitted, unlink ...`.
+
+Why Turbopack can fail intermittently on Windows:
+- Turbopack persistence can hit mapped-section file constraints (`os error 1224`) and compaction/write-batch contention.
+- These appear as `Persisting failed` / `compaction is already active` class errors.
+
+Supported Windows workflow (required):
+- Install/recover: `npm run install:clean`
+- Dev: `npm run dev:safe` (webpack default on Windows)
+- Turbo opt-in only:
   - PowerShell: `$env:VO_TURBO='1'; npm run dev:safe`
-  - Cross-shell: `npm run dev:turbo`
-- Optional: add Defender exclusions for the repo folder and `node_modules`.
+  - Direct turbo: `npm run dev:turbo`
+
+Mandatory operating rules:
+- Never run install commands while a dev server is running.
+- If EPERM recurs, close VS Code completely before rerunning install.
+
+Defender exclusions (optional but recommended):
+1. Open Windows Security -> Virus & threat protection.
+2. Open Manage settings -> Exclusions -> Add or remove exclusions.
+3. Add folder exclusion for repo root:
+   - `C:\Users\User\Desktop\Venture OS\venture-os`
+4. Add folder exclusion for:
+   - `C:\Users\User\Desktop\Venture OS\venture-os\node_modules`
 
 ## Key Pages
 - `/login`
@@ -29,4 +48,3 @@ Open: `http://localhost:3000` (or the printed fallback URL, commonly `http://loc
 - `/app/views`
 - `/app/audit`
 - `/app/proposals`
-

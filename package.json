@@ -10,6 +10,7 @@
     "dev:webpack": "next dev --webpack",
     "dev:turbo": "next dev",
     "dev:safe": "node scripts/dev-safe.mjs",
+    "check:node": "node scripts/check-node.mjs",
     "install:clean": "node scripts/install-clean.mjs",
     "build": "next build",
     "export:root": "next build && powershell -NoProfile -Command \"Copy-Item -Recurse -Force -Path out\\* -Destination ..\\\"",
@@ -28,4 +29,3 @@
     "tailwindcss": "^4"
   }
 }
-
