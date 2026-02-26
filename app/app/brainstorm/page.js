@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function BrainstormPage() {
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
+  const isFounder = cookieStore.get("founder_session")?.value === "1";
 
   if (!hasEntered) {
     redirect("/login");
@@ -29,9 +30,9 @@ export default async function BrainstormPage() {
         <Card
           className="brainstorm-layout__main"
           title="Prompt Console"
-          description="Generate a visual draft preview without mutating persisted state."
+          description="Generate AI drafts and apply as proposed nodes (never auto-commits)."
         >
-          <BrainstormClientLoader />
+          <BrainstormClientLoader isFounder={isFounder} />
         </Card>
         <Card
           className="brainstorm-layout__side"
