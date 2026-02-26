@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import AuditClient from "./audit-client";
 import AppNav from "../../../src/components/app-nav";
+import AppShell from "../../../src/components/ui/app-shell";
+import Card from "../../../src/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -15,14 +17,21 @@ export default async function AuditPage() {
   }
 
   return (
-    <main>
-      <h1>Audit (Draft, Local)</h1>
-      <p>Local audit events for draft commit actions.</p>
-      <AppNav current="/app/audit" />
-      <AuditClient />
-      <nav>
-        <Link href="/app">App area</Link> | <Link href="/app/nodes">Nodes</Link>
-      </nav>
-    </main>
+    <AppShell
+      title="Audit (Draft, Local)"
+      description="Local audit events for draft commit actions."
+    >
+      <Card>
+        <AppNav current="/app/audit" />
+      </Card>
+      <Card title="Audit Events">
+        <AuditClient />
+      </Card>
+      <Card>
+        <nav>
+          <Link href="/app">App area</Link> | <Link href="/app/nodes">Nodes</Link>
+        </nav>
+      </Card>
+    </AppShell>
   );
 }
