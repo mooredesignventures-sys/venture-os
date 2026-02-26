@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:safe": "node scripts/dev-safe.mjs",
+    "dev:3001": "next dev -p 3001",
     "build": "next build",
     "export:root": "next build && powershell -NoProfile -Command \"Copy-Item -Recurse -Force -Path out\\\\* -Destination ..\\\\\"",
     "start": "next start",
