@@ -7,29 +7,297 @@ import process from "node:process";
 const ROOT = process.cwd();
 const NEXT_DIR = path.join(ROOT, ".next");
 const LOCK_FILE = path.join(NEXT_DIR, "dev", "lock");
+const DEV_URL_FILE = path.join(NEXT_DIR, "dev-safe-url.json");
+const LAST_ERROR_FILE = path.join(NEXT_DIR, "dev-safe-last-error.txt");
+const NVMRC_FILE = path.join(ROOT, ".nvmrc");
+const NODE_MODULES_DIR = path.join(ROOT, "node_modules");
 const NEXT_BIN = path.join(ROOT, "node_modules", "next", "dist", "bin", "next");
 const VERIFY_BIN = path.join(ROOT, "scripts", "verify-dev-url.mjs");
-const PREFERRED_PORT = 3000;
-const FALLBACK_PORT = 3001;
+const PORT_CANDIDATES = [3000, 3001, 3002, 3003];
 const MAX_ATTEMPTS = 2;
+const RESTART_COOLDOWN_MS = 1200;
 const IS_WINDOWS = process.platform === "win32";
 const READY_MARKERS = ["Ready in", "Ready on", "Ready"];
-const TURBOPACK_FAILURE_MARKERS = [
-  "Turbopack build failed",
-  "inferred your workspace root",
-  "Persisting failed",
-  "os error 1224",
-  "compaction is already active",
-];
 
-function initialMode() {
+function ensureNextDir() {
+  fs.mkdirSync(NEXT_DIR, { recursive: true });
+}
+
+function clearFile(filePath) {
+  if (fs.existsSync(filePath)) {
+    fs.rmSync(filePath, { force: true });
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isRetryableFsError(error) {
+  return (
+    error &&
+    typeof error === "object" &&
+    ["EPERM", "EBUSY", "ENOTEMPTY", "EACCES"].includes(error.code)
+  );
+}
+
+async function removePathWithRetry(targetPath, { recursive = false, attempts = 5, delayMs = 500 } = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      if (!fs.existsSync(targetPath)) {
+        return true;
+      }
+      fs.rmSync(targetPath, { force: true, recursive });
+      if (!fs.existsSync(targetPath)) {
+        return true;
+      }
+    } catch (error) {
+      if (!isRetryableFsError(error) || attempt === attempts) {
+        return false;
+      }
+    }
+
+    await sleep(delayMs);
+  }
+
+  return !fs.existsSync(targetPath);
+}
+
+function writeLastError(content) {
+  try {
+    ensureNextDir();
+    const text = typeof content === "string" && content.trim() ? content : "No error output captured.";
+    fs.writeFileSync(LAST_ERROR_FILE, `${text}\n`);
+  } catch {
+    // Best effort.
+  }
+}
+
+function writeDevUrl(url) {
+  try {
+    ensureNextDir();
+    const parsed = new URL(url);
+    const port = Number(parsed.port);
+    fs.writeFileSync(
+      DEV_URL_FILE,
+      JSON.stringify(
+        {
+          url,
+          port: Number.isInteger(port) ? port : null,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      )
+    );
+  } catch {
+    // Best effort.
+  }
+}
+
+async function removeStaleLock() {
+  if (fs.existsSync(LOCK_FILE)) {
+    const removed = await removePathWithRetry(LOCK_FILE, { recursive: false, attempts: 6, delayMs: 700 });
+    if (!removed) {
+      writeLastError("Failed to remove .next/dev/lock after retries. Close active Node/Next processes and rerun dev:safe.");
+      console.error("[dev:safe] Failed to remove .next/dev/lock. Close active Node/Next processes and rerun.");
+      process.exit(1);
+    }
+  }
+}
+
+function readPinnedNodeVersion() {
+  try {
+    return fs.readFileSync(NVMRC_FILE, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function parseVersion(versionText) {
+  const [majorText = "0", minorText = "0", patchText = "0"] = String(versionText).trim().split(".");
+  const major = Number.parseInt(majorText, 10);
+  const minor = Number.parseInt(minorText, 10);
+  const patch = Number.parseInt(patchText, 10);
+
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || !Number.isInteger(patch)) {
+    return null;
+  }
+
+  return { major, minor, patch };
+}
+
+function isVersionLessThan(left, right) {
+  if (left.major !== right.major) {
+    return left.major < right.major;
+  }
+  if (left.minor !== right.minor) {
+    return left.minor < right.minor;
+  }
+  return left.patch < right.patch;
+}
+
+function warnIfNodeMismatch() {
+  const pinned = readPinnedNodeVersion();
+  if (!pinned) {
+    return;
+  }
+
+  const pinnedVersion = parseVersion(pinned);
+  const current = process.versions.node;
+  const currentVersion = parseVersion(current);
+  if (!pinnedVersion || !currentVersion) {
+    return;
+  }
+
+  if (
+    pinnedVersion.major !== currentVersion.major ||
+    isVersionLessThan(currentVersion, pinnedVersion)
+  ) {
+    console.warn(`[dev:safe] WARNING: Node ${pinned} is pinned in .nvmrc, current is ${current}.`);
+    console.warn("[dev:safe] WARNING: Dev may be unstable on this Node version.");
+  }
+}
+
+function ensureNodeModulesExists() {
+  if (!fs.existsSync(NODE_MODULES_DIR)) {
+    console.error("Run npm install");
+    writeLastError("node_modules missing. Run npm install");
+    process.exit(1);
+  }
+}
+
+function buildArgs(port) {
+  const args = [NEXT_BIN, "dev", "-p", String(port)];
+  args.push("--webpack");
+  return args;
+}
+
+function hasReadySignal(output) {
+  return READY_MARKERS.some((marker) => output.includes(marker));
+}
+
+function parseVerifyOutput(output) {
+  const lines = String(output)
+    .split(/\r?\n/)
+    .map((item) => item.trim());
+
+  const baseLine = lines.find((item) => item.startsWith("WORKING_BASE_URL="));
+  if (baseLine) {
+    return baseLine.slice("WORKING_BASE_URL=".length);
+  }
+
+  const fallbackLine = lines.find((item) => item.startsWith("WORKING_URL="));
+  return fallbackLine ? fallbackLine.slice("WORKING_URL=".length) : "";
+}
+
+function parsePortFromUrl(url) {
+  try {
+    return Number(new URL(url).port);
+  } catch {
+    return NaN;
+  }
+}
+
+function verifyWorkingUrl(port) {
+  if (!fs.existsSync(VERIFY_BIN)) {
+    return { ok: false, error: "Missing scripts/verify-dev-url.mjs." };
+  }
+
+  const result = spawnSync(process.execPath, [VERIFY_BIN], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      VO_DEV_PORT: String(port),
+      VO_VERIFY_RETRIES: "10",
+      VO_VERIFY_RETRY_MS: "500",
+    },
+    encoding: "utf8",
+  });
+
+  const url = parseVerifyOutput(result.stdout || "");
+  if (result.status === 0 && url) {
+    return { ok: true, url };
+  }
+
+  const message = (result.stderr || result.stdout || "").trim();
+  return {
+    ok: false,
+    error: message || "Run npm run dev:safe",
+  };
+}
+
+function listNextProcesses() {
   if (!IS_WINDOWS) {
-    return "turbopack";
+    const result = spawnSync("ps", ["-ax", "-o", "pid=,command="], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    if (result.status !== 0) {
+      return [];
+    }
+    return (result.stdout || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const firstSpace = line.indexOf(" ");
+        const pid = Number(line.slice(0, firstSpace));
+        const commandLine = line.slice(firstSpace + 1);
+        return { pid, commandLine };
+      })
+      .filter((row) => Number.isInteger(row.pid) && /next/i.test(row.commandLine));
   }
-  if (process.env.VO_TURBO === "1") {
-    return "turbopack";
+
+  const result = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      "$p=Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId,CommandLine; $p | ConvertTo-Json -Compress",
+    ],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+    }
+  );
+
+  if (result.status !== 0 || !result.stdout.trim()) {
+    return [];
   }
-  return "webpack";
+
+  const parsed = (() => {
+    try {
+      return JSON.parse(result.stdout);
+    } catch {
+      return [];
+    }
+  })();
+
+  const rows = Array.isArray(parsed) ? parsed : [parsed];
+  return rows
+    .filter((row) => row && typeof row.ProcessId === "number")
+    .map((row) => ({
+      pid: row.ProcessId,
+      commandLine: typeof row.CommandLine === "string" ? row.CommandLine : "",
+    }))
+    .filter((row) => /next/i.test(row.commandLine));
+}
+
+function enforceSingleNextProcess() {
+  const nextProcs = listNextProcesses();
+  if (nextProcs.length === 0) {
+    return;
+  }
+
+  const summary = nextProcs.map((row) => `${row.pid}`).join(", ");
+  writeLastError(
+    `Detected existing Next process(es): ${summary}. Stop running dev servers and rerun npm run dev:safe.`
+  );
+  console.error("[dev:safe] Existing Next process detected. Stop running dev servers and rerun.");
+  process.exit(1);
 }
 
 function isPortFree(port) {
@@ -43,98 +311,21 @@ function isPortFree(port) {
   });
 }
 
-async function resolveInitialPort() {
-  if (await isPortFree(PREFERRED_PORT)) {
-    return PREFERRED_PORT;
-  }
-  console.log(`[dev:safe] Port ${PREFERRED_PORT} is busy. Falling back to ${FALLBACK_PORT}.`);
-  return FALLBACK_PORT;
-}
-
-function removeStaleLock() {
-  if (fs.existsSync(LOCK_FILE)) {
-    fs.rmSync(LOCK_FILE, { force: true });
-    console.log("[dev:safe] Removed stale .next/dev/lock.");
-  }
-}
-
-function removeNextDir() {
-  if (fs.existsSync(NEXT_DIR)) {
-    fs.rmSync(NEXT_DIR, { recursive: true, force: true });
-    console.log("[dev:safe] Removed .next directory.");
-  }
-}
-
-function hasTurbopackFailure(output) {
-  return TURBOPACK_FAILURE_MARKERS.some((marker) => output.includes(marker));
-}
-
-function buildArgs(port, mode) {
-  const args = [NEXT_BIN, "dev", "-p", String(port)];
-  if (mode === "webpack") {
-    args.push("--webpack");
-  }
-  return args;
-}
-
-function hasReadySignal(output) {
-  return READY_MARKERS.some((marker) => output.includes(marker));
-}
-
-function parseVerifierOutput(output) {
-  const lines = String(output)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const baseLine = lines.find((line) => line.startsWith("WORKING_BASE_URL="));
-  const baseUrl = baseLine ? baseLine.replace("WORKING_BASE_URL=", "") : "";
-  const routesStart = lines.findIndex((line) => line === "WORKING_URLS:");
-  const routes = routesStart >= 0 ? lines.slice(routesStart + 1) : [];
-
-  return { baseUrl, routes };
-}
-
-function verifyWorkingUrl(port) {
-  if (!fs.existsSync(VERIFY_BIN)) {
-    return { ok: false, error: "Missing scripts/verify-dev-url.mjs." };
-  }
-
-  const result = spawnSync(process.execPath, [VERIFY_BIN], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      VO_DEV_PORT: String(port),
-    },
-    encoding: "utf8",
-  });
-
-  if (result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-
-  if (result.stderr) {
-    process.stderr.write(result.stderr);
-  }
-
-  const parsed = parseVerifierOutput(result.stdout || "");
-  if (result.status === 0 && parsed.baseUrl) {
-    console.log(`[dev:safe] OPEN THIS URL: ${parsed.baseUrl}/login`);
-    if (parsed.routes.length > 0) {
-      console.log("[dev:safe] Verified working routes:");
-      for (const route of parsed.routes) {
-        console.log(`[dev:safe] - ${route}`);
-      }
+async function resolvePort() {
+  const requested = Number.parseInt(process.env.VO_DEV_PORT || "", 10);
+  if (Number.isInteger(requested) && PORT_CANDIDATES.includes(requested)) {
+    if (await isPortFree(requested)) {
+      return requested;
     }
-
-    return { ok: true };
   }
 
-  return {
-    ok: false,
-    error:
-      (result.stderr || result.stdout || "").trim() ||
-      `verify-dev-url exited with code ${result.status ?? 1}.`,
-  };
+  for (const port of PORT_CANDIDATES) {
+    if (await isPortFree(port)) {
+      return port;
+    }
+  }
+
+  throw new Error("No free dev port in 3000-3003.");
 }
 
 function stopChildGracefully(child) {
@@ -179,13 +370,11 @@ function stopChildGracefully(child) {
   });
 }
 
-function startNextDev({ port, mode, attempt }) {
+function startNextDev({ port, attempt }) {
   return new Promise((resolve) => {
-    const args = buildArgs(port, mode);
+    const args = buildArgs(port);
 
-    console.log(
-      `[dev:safe] Starting Next dev (${mode}) on port ${port} (attempt ${attempt}/${MAX_ATTEMPTS}).`
-    );
+    console.log(`[dev:safe] Starting Next dev (webpack) on port ${port} (attempt ${attempt}/${MAX_ATTEMPTS}).`);
     const child = spawn(process.execPath, args, {
       cwd: ROOT,
       stdio: ["inherit", "pipe", "pipe"],
@@ -208,19 +397,30 @@ function startNextDev({ port, mode, attempt }) {
 
       verifying = true;
       const verification = verifyWorkingUrl(port);
-      verifierComplete = verification.ok;
       verifying = false;
 
       if (verification.ok) {
+        const resolvedPort = parsePortFromUrl(verification.url);
+        if (!Number.isInteger(resolvedPort) || resolvedPort !== port) {
+          verifierFailure = true;
+          verifierError = `Port mismatch detected. Expected localhost:${port}, verified ${verification.url}. Stop other dev servers and rerun npm run dev:safe.`;
+          writeLastError(verifierError);
+          await stopChildGracefully(child);
+          return;
+        }
+
+        verifierComplete = true;
+        writeDevUrl(verification.url);
+        clearFile(LAST_ERROR_FILE);
+        const loginUrl = new URL("/login", `${verification.url}/`).toString();
+        const appUrl = new URL("/app", `${verification.url}/`).toString();
+        console.log(`OPEN_URLS login=${loginUrl} app=${appUrl}`);
         return;
       }
 
       verifierFailure = true;
       verifierError = verification.error;
-      console.error("[dev:safe] CRITICAL: URL verification failed. Stopping dev server.");
-      if (verifierError) {
-        console.error(`[dev:safe] ${verifierError}`);
-      }
+      writeLastError(`${verification.error}\n\n${output}`);
       await stopChildGracefully(child);
     }
 
@@ -242,67 +442,78 @@ function startNextDev({ port, mode, attempt }) {
         code: code ?? 1,
         signal,
         output,
-        turbopackFailure: mode === "turbopack" && hasTurbopackFailure(output),
         verifierFailure,
         verifierError,
       });
     });
 
-    child.on("error", () => {
+    child.on("error", (error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      writeLastError(`${errorMessage}\n\n${output}`);
       resolve({
         code: 1,
         signal: "spawn_error",
         output,
-        turbopackFailure: mode === "turbopack" && hasTurbopackFailure(output),
         verifierFailure,
-        verifierError,
+        verifierError: errorMessage,
       });
     });
   });
 }
 
-async function main() {
-  removeStaleLock();
-  let port = await resolveInitialPort();
-  console.log(`[dev:safe] Local URL: http://localhost:${port}`);
+async function removeNextDir() {
+  if (fs.existsSync(NEXT_DIR)) {
+    const removed = await removePathWithRetry(NEXT_DIR, { recursive: true, attempts: 6, delayMs: 800 });
+    if (!removed) {
+      writeLastError("Failed to remove .next directory after retries. Close active Node/Next processes and rerun dev:safe.");
+      console.error("[dev:safe] Failed to clean .next after retries. Close active Node/Next processes and rerun.");
+      process.exit(1);
+    }
+  }
+}
 
-  let mode = initialMode();
-  if (IS_WINDOWS && mode === "webpack") {
-    console.log("[dev:safe] Windows detected: defaulting to webpack mode (set VO_TURBO=1 to opt into Turbopack).");
+async function main() {
+  ensureNextDir();
+  clearFile(DEV_URL_FILE);
+  clearFile(LAST_ERROR_FILE);
+  warnIfNodeMismatch();
+  ensureNodeModulesExists();
+  enforceSingleNextProcess();
+  await removeStaleLock();
+
+  let port;
+  try {
+    port = await resolvePort();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writeLastError(message);
+    console.error(`[dev:safe] ${message}`);
+    process.exit(1);
   }
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    if (!(await isPortFree(port)) && port === PREFERRED_PORT) {
-      port = FALLBACK_PORT;
-      console.log(`[dev:safe] Port ${PREFERRED_PORT} became busy. Retrying on ${FALLBACK_PORT}.`);
-    }
+    const result = await startNextDev({ port, attempt });
 
-    const result = await startNextDev({ port, mode, attempt });
     if (result.verifierFailure) {
-      console.error("[dev:safe] Dev server stopped because URL verification failed.");
       process.exit(result.code || 1);
     }
 
     if (result.code === 0 || result.signal === "SIGINT" || result.signal === "SIGTERM") {
+      if (result.code && result.code !== 0) {
+        writeLastError(result.output);
+      }
       process.exit(result.code);
     }
 
     if (attempt >= MAX_ATTEMPTS) {
-      console.error(`[dev:safe] Failed after ${MAX_ATTEMPTS} attempts.`);
+      writeLastError(result.output);
       process.exit(result.code || 1);
     }
 
-    if (mode === "turbopack" && result.turbopackFailure) {
-      console.log("[dev:safe] Turbopack failure detected. Falling back to webpack dev mode.");
-      mode = "webpack";
-    } else {
-      console.log("[dev:safe] Dev server exited unexpectedly. Retrying once.");
-    }
-
-    removeNextDir();
-    removeStaleLock();
+    await sleep(RESTART_COOLDOWN_MS);
+    await removeNextDir();
+    await removeStaleLock();
   }
 }
 
 main();
-

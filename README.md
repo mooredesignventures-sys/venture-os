@@ -2,16 +2,19 @@
 
 ## Node Version
 - Use Node 22 LTS for this repo (`22.11.0`).
+- If Node is not `22.11.0+` on major `22`, install is blocked by `npm` preinstall guard.
 - This reduces native module install churn on Windows (for example `lightningcss` lock/unlink failures).
 
 ## Run Locally (Windows)
 ```powershell
 cd "C:\Users\User\Desktop\Venture OS\venture-os"
-npm run install:clean
+nvm use 22.11.0
+npm install
 npm run dev:safe
 ```
 
-Open: `http://localhost:3000` (or the printed fallback URL, commonly `http://localhost:3001`).
+`dev:safe` prints one line you can copy:
+- `OPEN_URLS login=http://localhost:3000/login app=http://localhost:3000/app`
 
 ## Windows Stability
 Why EPERM happens on Windows:
