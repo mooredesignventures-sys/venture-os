@@ -5,6 +5,8 @@
 body {
   margin: 0;
   font-family: Arial, Helvetica, sans-serif;
+  background: #f7f7f7;
+  color: #222;
 }
 
 main {
@@ -17,4 +19,144 @@ h1 {
 
 a {
   color: inherit;
+}
+
+.ui-page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+.ui-page-header {
+  margin-bottom: 1rem;
+}
+
+.ui-page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.ui-page-content {
+  display: grid;
+  gap: 1rem;
+}
+
+.ui-card {
+  background: #fff;
+  border: 1px solid #dcdcdc;
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.ui-card-title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ui-badge-neutral {
+  background: #ececec;
+  color: #333;
+}
+
+.ui-badge-info {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.ui-button {
+  border: 1px solid #222;
+  border-radius: 8px;
+  padding: 0.4rem 0.8rem;
+  background: #222;
+  color: #fff;
+  cursor: pointer;
+}
+
+.ui-button-secondary {
+  background: #fff;
+  color: #222;
+}
+
+.ui-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ui-tab {
+  display: inline-flex;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #cfcfcf;
+  border-radius: 8px;
+  text-decoration: none;
+  background: #fff;
+}
+
+.ui-tab-active {
+  border-color: #222;
+  font-weight: 700;
+}
+
+.ui-banner {
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid;
+}
+
+.ui-banner-info {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.ui-banner-success {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+}
+
+.ui-banner-toast {
+  margin-bottom: 0.75rem;
+}
+
+.ui-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 20;
+}
+
+.ui-modal-panel {
+  width: min(520px, 100%);
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #d0d0d0;
+  padding: 1rem;
+}
+
+.ui-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.ui-modal-close {
+  border: 1px solid #bcbcbc;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
 }

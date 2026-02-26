@@ -2,6 +2,11 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import AppNav from "../../../src/components/app-nav";
+import Badge from "../../../src/components/ui/badge";
+import Banner from "../../../src/components/ui/banner";
+import Card from "../../../src/components/ui/card";
+import PageLayout from "../../../src/components/ui/page-layout";
+import Tabs from "../../../src/components/ui/tabs";
 import ViewScopeToggle from "./view-scope-toggle";
 
 export const dynamic = "force-dynamic";
@@ -19,22 +24,44 @@ export default async function ViewsPage({ searchParams }) {
   }
 
   return (
-    <main>
-      <h1>Views ({modeLabel})</h1>
-      <p>Review decision, requirement, and relationship snapshots in {modeLabel} mode.</p>
-      <AppNav current="/app/views" />
-      <ViewScopeToggle basePath="/app/views" scope={scope} />
-      <ul>
-        <li>
+    <PageLayout
+      title="Views"
+      description={`Review decision, requirement, and relationship snapshots in ${modeLabel} mode.`}
+      badge={<Badge tone="neutral">{modeLabel}</Badge>}
+    >
+      <Card>
+        <Banner tone="info">Views are read-only projections of your graph.</Banner>
+      </Card>
+      <Card title="Navigation">
+        <AppNav current="/app/views" />
+      </Card>
+      <Card title="View Scope">
+        <ViewScopeToggle basePath="/app/views" scope={scope} />
+      </Card>
+      <Card title="View Tabs">
+        <Tabs
+          items={[
+            { href: `/app/views/decisions${scopeQuery}`, label: "Decision Tree", active: false },
+            {
+              href: `/app/views/requirements${scopeQuery}`,
+              label: "Requirements Tree",
+              active: false,
+            },
+            { href: `/app/views/business${scopeQuery}`, label: "Business Graph", active: false },
+          ]}
+        />
+      </Card>
+      <Card>
+        <p>
           <Link href={`/app/views/decisions${scopeQuery}`}>Decision Tree</Link>
-        </li>
-        <li>
+        </p>
+        <p>
           <Link href={`/app/views/requirements${scopeQuery}`}>Requirements Tree</Link>
-        </li>
-        <li>
+        </p>
+        <p>
           <Link href={`/app/views/business${scopeQuery}`}>Business Graph</Link>
-        </li>
-      </ul>
-    </main>
+        </p>
+      </Card>
+    </PageLayout>
   );
 }
