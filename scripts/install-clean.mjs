@@ -90,6 +90,9 @@ function printEpermGuidance() {
 }
 
 async function main() {
+  console.log("[install:clean] Running npm run check:node (warning-only).");
+  await runCommand("npm", ["run", "check:node"], { allowFailure: true });
+
   await stopLockingProcesses();
   await cleanupTargets();
 
