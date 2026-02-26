@@ -1568,7 +1568,7 @@ export default function NodesDraftClient({ isFounder = false }) {
   return (
     <section>
       <p className="vo-meta">
-        Founder mode: <strong>{isFounder ? "On" : "Off"}</strong>
+        Founder mode: <strong>{isFounder ? "Active" : "Read-only"}</strong>
       </p>
       <p>
         <label htmlFor="privileged-confirmed">Type CONFIRMED for privileged actions</label>
@@ -1773,7 +1773,7 @@ export default function NodesDraftClient({ isFounder = false }) {
           title="No draft nodes found."
           message="Load demo data or add your first draft node to get started."
           action={
-            <button type="button" onClick={handleLoadDemoData} disabled={!isFounder}>
+            <button type="button" onClick={handleLoadDemoData}>
               Load Demo Data
             </button>
           }

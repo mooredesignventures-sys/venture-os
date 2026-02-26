@@ -11,7 +11,6 @@ export const dynamic = "force-dynamic";
 export default async function AppPage() {
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
-  const isFounder = cookieStore.get("founder_session")?.value === "1";
 
   if (!hasEntered) {
     redirect("/login");
@@ -44,7 +43,6 @@ export default async function AppPage() {
         </p>
       </Card>
       <Card title="Session">
-        <p className="vo-meta">Founder mode: {isFounder ? "On" : "Off"}</p>
         <ExitButton />
       </Card>
       <Card>
