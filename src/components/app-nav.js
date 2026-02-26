@@ -16,26 +16,37 @@ const NAV_ITEMS = [
 const THEME_STORAGE_KEY = "theme";
 
 function applyTheme(theme) {
+  if (typeof document === "undefined") {
+    return;
+  }
   document.documentElement.setAttribute("data-theme", theme);
 }
 
 export default function AppNav({ current }) {
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-    const nextTheme =
-      storedTheme === "dark" || storedTheme === "light" ? storedTheme : systemTheme;
+    try {
+      const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+      const nextTheme =
+        storedTheme === "dark" || storedTheme === "light" ? storedTheme : systemTheme;
 
-    applyTheme(nextTheme);
+      applyTheme(nextTheme);
+    } catch {
+      applyTheme("dark");
+    }
   }, []);
 
   function handleThemeToggle() {
-    const currentTheme = document.documentElement.getAttribute("data-theme");
-    const nextTheme = currentTheme === "dark" ? "light" : "dark";
-    applyTheme(nextTheme);
-    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    try {
+      const currentTheme = document.documentElement.getAttribute("data-theme");
+      const nextTheme = currentTheme === "dark" ? "light" : "dark";
+      applyTheme(nextTheme);
+      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    } catch {
+      applyTheme("dark");
+    }
   }
 
   return (

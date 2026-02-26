@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import AppNav from "../../../src/components/app-nav";
 import AppShell from "../../../src/components/ui/app-shell";
 import Card from "../../../src/components/ui/card";
-import BrainstormClient from "./brainstorm-client";
+import BrainstormClientLoader from "./brainstorm-client-loader";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,7 @@ export default async function BrainstormPage() {
           title="Prompt Console"
           description="Generate a visual draft preview without mutating persisted state."
         >
-          <BrainstormClient />
+          <BrainstormClientLoader />
         </Card>
         <Card
           className="brainstorm-layout__side"
