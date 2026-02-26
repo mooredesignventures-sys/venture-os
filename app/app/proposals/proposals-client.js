@@ -254,7 +254,9 @@ function buildExecutionPack(graph) {
         .map((edge) =>
           graph.committedNodeById.get(edge.from === decision.id ? edge.to : edge.from)
         )
-        .filter((node) => ["KPI", "Risk", "Task"].includes(node?.type))
+        .filter((node) =>
+          ["Task", "KPI", "Risk", "Asset", "Revenue", "Product"].includes(node?.type)
+        )
     );
 
     lines.push(`## Decision: ${decision.title} (${decision.id})`);
@@ -267,7 +269,7 @@ function buildExecutionPack(graph) {
         lines.push(`- ${req.title} (${req.id})`);
       }
     }
-    lines.push("KPIs/Risks/Tasks:");
+    lines.push("Tasks/KPIs/Risks/Assets/Revenue/Product:");
     if (executionNodes.length === 0) {
       lines.push("- None");
     } else {
