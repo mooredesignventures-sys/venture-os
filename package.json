@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22 <23"
+    "node": ">=22.11.0 <23"
   },
   "scripts": {
-    "dev": "next dev",
+    "preinstall": "node scripts/enforce-node-version.mjs",
+    "dev": "next dev --webpack",
     "dev:webpack": "next dev --webpack",
-    "dev:turbo": "next dev",
+    "dev:turbo": "node -e \"console.error('Turbopack disabled. Use npm run dev:safe'); process.exit(1)\"",
     "dev:safe": "node scripts/dev-safe.mjs",
     "dev:verify": "node scripts/verify-dev-url.mjs",
     "check:node": "node scripts/check-node.mjs",

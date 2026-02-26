@@ -1,34 +1,71 @@
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import process from "node:process";
 
-const PORTS = [3000, 3001];
-const ROUTES_TO_CHECK = ["/login", "/app"];
-const DISPLAY_ROUTES = ["/login", "/app", "/app/nodes", "/app/views", "/app/audit"];
-const REDIRECT_MIN = 300;
-const REDIRECT_MAX = 399;
-const BRAINSTORM_PAGE = path.join(process.cwd(), "app", "app", "brainstorm", "page.js");
-
-function isRedirect(statusCode) {
-  return statusCode >= REDIRECT_MIN && statusCode <= REDIRECT_MAX;
-}
-
-function isUrlLive(statusCode) {
-  return statusCode === 200 || statusCode === 307;
-}
+const DEV_URL_FILE = path.join(process.cwd(), ".next", "dev-safe-url.json");
+const PORTS = [3000, 3001, 3002, 3003];
+const REQUIRED_ROUTES = ["/login", "/app"];
+const OPTIONAL_ROUTES = ["/app/nodes"];
+const RETRIES = Number.parseInt(process.env.VO_VERIFY_RETRIES || "8", 10);
+const RETRY_MS = Number.parseInt(process.env.VO_VERIFY_RETRY_MS || "500", 10);
 
 function parseExpectedPort() {
-  const rawPort = process.env.VO_DEV_PORT;
-  if (!rawPort) {
+  const raw = process.env.VO_DEV_PORT;
+  if (!raw) {
     return null;
   }
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) ? parsed : null;
+}
 
-  const parsedPort = Number(rawPort);
-  if (!Number.isInteger(parsedPort)) {
+function parseSavedUrl() {
+  try {
+    const raw = fs.readFileSync(DEV_URL_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.url === "string" && parsed.url) {
+      return parsed.url;
+    }
+    if (typeof parsed?.baseUrl === "string" && parsed.baseUrl) {
+      return parsed.baseUrl;
+    }
+    return null;
+  } catch {
     return null;
   }
+}
 
-  return parsedPort;
+function buildCandidateUrls(savedUrl, expectedPort) {
+  const candidates = [];
+  const seen = new Set();
+
+  function push(url) {
+    if (!url || seen.has(url)) {
+      return;
+    }
+    seen.add(url);
+    candidates.push(url);
+  }
+
+  push(savedUrl);
+  if (Number.isInteger(expectedPort)) {
+    push(`http://localhost:${expectedPort}`);
+  }
+  for (const port of PORTS) {
+    push(`http://localhost:${port}`);
+  }
+
+  return candidates;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isHealthyStatus(status) {
+  return status === 200 || (status >= 300 && status <= 399);
 }
 
 async function requestRoute(baseUrl, routePath) {
@@ -36,93 +73,106 @@ async function requestRoute(baseUrl, routePath) {
 
   for (const method of methods) {
     try {
-      const response = await fetch(`${baseUrl}${routePath}`, {
-        method,
-        redirect: "manual",
+      const status = await new Promise((resolve, reject) => {
+        const request = http.request(`${baseUrl}${routePath}`, {
+          method,
+          timeout: 1500,
+        });
+        request.on("response", (response) => {
+          response.resume();
+          resolve(response.statusCode || 0);
+        });
+        request.on("timeout", () => {
+          request.destroy(new Error("timeout"));
+        });
+        request.on("error", reject);
+        request.end();
       });
-
-      return { ok: true, status: response.status };
+      return status;
     } catch {
-      // Try GET when HEAD is unsupported or request fails.
+      // Try GET if HEAD is not supported.
     }
   }
 
-  return { ok: false, status: 0 };
+  return 0;
 }
 
-async function probePort(port) {
-  const baseUrl = `http://localhost:${port}`;
-  const loginResponse = await requestRoute(baseUrl, ROUTES_TO_CHECK[0]);
+async function isUrlLive(baseUrl) {
+  const verifiedRequired = [];
 
-  if (!loginResponse.ok) {
-    return { live: false, baseUrl, port };
+  for (const routePath of REQUIRED_ROUTES) {
+    const status = await requestRoute(baseUrl, routePath);
+    if (!isHealthyStatus(status)) {
+      return null;
+    }
+    verifiedRequired.push(`${baseUrl}${routePath}`);
   }
 
-  const appResponse = await requestRoute(baseUrl, ROUTES_TO_CHECK[1]);
-  if (!appResponse.ok) {
-    return { live: false, baseUrl, port };
+  const verifiedOptional = [];
+  for (const routePath of OPTIONAL_ROUTES) {
+    const status = await requestRoute(baseUrl, routePath);
+    if (isHealthyStatus(status)) {
+      verifiedOptional.push(`${baseUrl}${routePath}`);
+    }
   }
 
   return {
-    live: isUrlLive(loginResponse.status),
-    baseUrl,
-    port,
+    verifiedRequired,
+    verifiedOptional,
   };
 }
 
-async function verifyDisplayRoutes(baseUrl) {
-  const routes = [...DISPLAY_ROUTES];
-  if (fs.existsSync(BRAINSTORM_PAGE)) {
-    routes.push("/app/brainstorm");
+function persistUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const port = Number(parsed.port);
+    fs.mkdirSync(path.dirname(DEV_URL_FILE), { recursive: true });
+    fs.writeFileSync(
+      DEV_URL_FILE,
+      JSON.stringify(
+        {
+          url,
+          port: Number.isInteger(port) ? port : null,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      )
+    );
+  } catch {
+    // Non-fatal.
   }
-
-  const verifiedUrls = [];
-
-  for (const routePath of routes) {
-    const response = await requestRoute(baseUrl, routePath);
-    if (!response.ok) {
-      continue;
-    }
-
-    if (response.status === 200 || isRedirect(response.status)) {
-      verifiedUrls.push(`${baseUrl}${routePath}`);
-    }
-  }
-
-  return verifiedUrls;
 }
 
 async function main() {
   const expectedPort = parseExpectedPort();
-  const checks = [];
+  const savedUrl = parseSavedUrl();
+  const candidates = buildCandidateUrls(savedUrl, expectedPort);
 
-  for (const port of PORTS) {
-    checks.push(await probePort(port));
+  for (let attempt = 1; attempt <= RETRIES; attempt += 1) {
+    for (const url of candidates) {
+      const result = await isUrlLive(url);
+      if (result) {
+        persistUrl(url);
+        console.log(`WORKING_BASE_URL=${url}`);
+        console.log(`WORKING_URL=${url}`);
+        for (const verifiedUrl of result.verifiedRequired) {
+          console.log(`VERIFIED_URL=${verifiedUrl}`);
+        }
+        for (const verifiedUrl of result.verifiedOptional) {
+          console.log(`VERIFIED_URL=${verifiedUrl}`);
+        }
+        process.exit(0);
+      }
+    }
+
+    if (attempt < RETRIES) {
+      await sleep(RETRY_MS);
+    }
   }
 
-  const liveChecks = checks.filter((check) => check.live);
-  if (liveChecks.length === 0) {
-    console.error("[dev:verify] No working dev server found on localhost:3000 or localhost:3001.");
-    process.exit(1);
-  }
-
-  const selectedCheck =
-    expectedPort !== null
-      ? liveChecks.find((check) => check.port === expectedPort) || liveChecks[0]
-      : liveChecks[0];
-
-  const workingUrls = await verifyDisplayRoutes(selectedCheck.baseUrl);
-
-  if (workingUrls.length === 0) {
-    console.error(`[dev:verify] ${selectedCheck.baseUrl} responded, but no expected routes verified.`);
-    process.exit(1);
-  }
-
-  console.log(`WORKING_BASE_URL=${selectedCheck.baseUrl}`);
-  console.log("WORKING_URLS:");
-  for (const url of workingUrls) {
-    console.log(url);
-  }
+  console.error("Run npm run dev:safe");
+  process.exit(1);
 }
 
 main();
