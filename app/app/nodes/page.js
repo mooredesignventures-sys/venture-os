@@ -18,13 +18,17 @@ export default async function NodesPage() {
 
   return (
     <AppShell
+      grid
       title="Nodes (Draft)"
-      description="Draft only - DB will come after Master Spec."
+      description="War-room node staging, relationships, and commit controls."
     >
       <Card description="Manage draft nodes, relationships, and local bundle actions.">
         <AppNav current="/app/nodes" />
       </Card>
-      <Card title="Nodes Workspace">
+      <Card
+        title="Nodes Workspace"
+        description="Use CONFIRMED when committing. Buttons and inputs are visual-only updates."
+      >
         <NodesDraftClientLoader />
       </Card>
       <Card>

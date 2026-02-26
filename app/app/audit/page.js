@@ -18,6 +18,7 @@ export default async function AuditPage() {
 
   return (
     <AppShell
+      grid
       title="Audit (Draft, Local)"
       description="Local audit events for draft commit actions."
     >

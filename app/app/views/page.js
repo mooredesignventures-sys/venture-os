@@ -22,6 +22,7 @@ export default async function ViewsPage({ searchParams }) {
 
   return (
     <AppShell
+      grid
       title={`Views (${modeLabel})`}
       description={`Review decision, requirement, and relationship snapshots in ${modeLabel} mode.`}
     >
