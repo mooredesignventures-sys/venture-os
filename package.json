@@ -10,6 +10,7 @@
     "dev:webpack": "next dev --webpack",
     "dev:turbo": "next dev",
     "dev:safe": "node scripts/dev-safe.mjs",
+    "dev:verify": "node scripts/verify-dev-url.mjs",
     "check:node": "node scripts/check-node.mjs",
     "install:clean": "node scripts/install-clean.mjs",
     "build": "next build",
