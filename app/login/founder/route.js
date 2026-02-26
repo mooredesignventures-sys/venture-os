@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 
 export async function GET(request) {
+  const secure = process.env.NODE_ENV === "production";
   const response = NextResponse.redirect(new URL("/app", request.url));
   response.cookies.set({
     name: "temp_app_access",
     value: "1",
     path: "/",
     sameSite: "lax",
-    secure: false,
+    secure,
     maxAge: 60 * 60 * 24,
   });
   response.cookies.set({
@@ -16,7 +17,7 @@ export async function GET(request) {
     httpOnly: true,
     path: "/",
     sameSite: "lax",
-    secure: false,
+    secure,
     maxAge: 60 * 60 * 24,
   });
   return response;
