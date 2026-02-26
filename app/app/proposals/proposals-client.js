@@ -6,6 +6,12 @@ const NODE_STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 const ACTOR_PLACEHOLDER = "founder";
+const EMPTY_GRAPH = {
+  committedNodes: [],
+  committedEdges: [],
+  committedNodeById: new Map(),
+  nodeById: new Map(),
+};
 
 const TEMPLATES = {
   decision: `Proposal Type: Decision
@@ -282,7 +288,8 @@ function buildExecutionPack(graph) {
 }
 
 export default function ProposalsClient() {
-  const [graph, setGraph] = useState(null);
+  const [mounted, setMounted] = useState(false);
+  const [graph, setGraph] = useState(EMPTY_GRAPH);
   const [text, setText] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
   const [selectedDecisionId, setSelectedDecisionId] = useState("");
@@ -292,10 +299,22 @@ export default function ProposalsClient() {
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      setGraph(getCommittedGraph());
+      setMounted(true);
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (!mounted) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      setGraph(getCommittedGraph());
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [mounted]);
 
   function generate(templateKey) {
     setText(TEMPLATES[templateKey]);
@@ -345,7 +364,7 @@ export default function ProposalsClient() {
     setCopyMessage("Downloaded.");
   }
 
-  if (!graph) {
+  if (!mounted) {
     return (
       <section>
         <p>Loading proposals...</p>
