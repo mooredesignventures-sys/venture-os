@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const NODE_STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 const ACTOR_PLACEHOLDER = "founder";
+const EMPTY_GRAPH = {
+  committedNodes: [],
+  committedEdges: [],
+  committedNodeById: new Map(),
+  nodeById: new Map(),
+};
 
 const TEMPLATES = {
   decision: `Proposal Type: Decision
@@ -284,10 +290,29 @@ function buildExecutionPack(graph) {
 }
 
 export default function ProposalsClient() {
+  const [graph, setGraph] = useState(EMPTY_GRAPH);
+  const [mounted, setMounted] = useState(false);
   const [text, setText] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
   const [selectedDecisionId, setSelectedDecisionId] = useState("");
-  const graph = getCommittedGraph();
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setMounted(true);
+      setGraph(getCommittedGraph());
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <section>
+        <p>Loading proposals...</p>
+      </section>
+    );
+  }
+
   const committedDecisions = graph.committedNodes.filter(
     (node) => node.type === "Decision"
   );
