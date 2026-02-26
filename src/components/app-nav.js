@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect } from "react";
 import Link from "next/link";
 
 const NAV_ITEMS = [
@@ -9,19 +12,48 @@ const NAV_ITEMS = [
   { href: "/app/tour", label: "Tour" },
 ];
 
+const THEME_STORAGE_KEY = "theme";
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+}
+
 export default function AppNav({ current }) {
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+    const nextTheme =
+      storedTheme === "dark" || storedTheme === "light" ? storedTheme : systemTheme;
+
+    applyTheme(nextTheme);
+  }, []);
+
+  function handleThemeToggle() {
+    const currentTheme = document.documentElement.getAttribute("data-theme");
+    const nextTheme = currentTheme === "dark" ? "light" : "dark";
+    applyTheme(nextTheme);
+    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  }
+
   return (
-    <nav>
-      {NAV_ITEMS.map((item, index) => (
-        <span key={item.href}>
-          {index > 0 ? " | " : ""}
-          {current === item.href ? (
-            <strong>{item.label}</strong>
-          ) : (
-            <Link href={item.href}>{item.label}</Link>
-          )}
-        </span>
-      ))}
+    <nav className="app-nav">
+      <span className="app-nav-links">
+        {NAV_ITEMS.map((item, index) => (
+          <span key={item.href}>
+            {index > 0 ? " | " : ""}
+            {current === item.href ? (
+              <strong>{item.label}</strong>
+            ) : (
+              <Link href={item.href}>{item.label}</Link>
+            )}
+          </span>
+        ))}
+      </span>{" "}
+      <button type="button" className="theme-toggle" onClick={handleThemeToggle}>
+        Toggle theme
+      </button>
     </nav>
   );
 }
