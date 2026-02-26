@@ -36,6 +36,9 @@ export default async function AppPage() {
           <Link href="/app/proposals">Guided Proposals (Draft)</Link>
         </p>
         <p>
+          <Link href="/app/brainstorm">Brainstorm (AI Draft)</Link>
+        </p>
+        <p>
           <Link href="/app/audit">Audit (Draft, Local)</Link>
         </p>
         <p>

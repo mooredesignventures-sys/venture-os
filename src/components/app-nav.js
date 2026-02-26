@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: "/app/nodes", label: "Nodes" },
   { href: "/app/views", label: "Views" },
   { href: "/app/proposals", label: "Proposals" },
+  { href: "/app/brainstorm", label: "Brainstorm" },
   { href: "/app/audit", label: "Audit" },
   { href: "/app/nodes#bundle-json", label: "Export" },
   { href: "/app/tour", label: "Tour" },
