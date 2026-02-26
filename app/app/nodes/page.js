@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function NodesPage() {
   const cookieStore = await cookies();
   const hasEntered = cookieStore.get("temp_app_access")?.value === "1";
+  const isFounder = cookieStore.get("founder_session")?.value === "1";
 
   if (!hasEntered) {
     redirect("/login");
@@ -42,7 +43,7 @@ export default async function NodesPage() {
             description="Use CONFIRMED when committing. Buttons and inputs are visual-only updates."
           >
             <div className="nodes-workspace">
-              <NodesDraftClientLoader />
+              <NodesDraftClientLoader isFounder={isFounder} />
             </div>
           </Card>
         </section>

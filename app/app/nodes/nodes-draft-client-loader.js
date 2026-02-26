@@ -7,6 +7,6 @@ const NodesDraftClient = dynamic(() => import("./nodes-draft-client"), {
   loading: () => <p>Loading draft nodes...</p>,
 });
 
-export default function NodesDraftClientLoader() {
-  return <NodesDraftClient />;
+export default function NodesDraftClientLoader({ isFounder = false }) {
+  return <NodesDraftClient isFounder={isFounder} />;
 }
