@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import ViewClientLoader from "../view-client-loader";
 import AppNav from "../../../../src/components/app-nav";
 import ViewScopeToggle from "../view-scope-toggle";
+import AppShell from "../../../../src/components/ui/app-shell";
+import Card from "../../../../src/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -20,16 +22,25 @@ export default async function BusinessViewPage({ searchParams }) {
   }
 
   return (
-    <main>
-      <h1>Business Graph ({modeLabel})</h1>
-      <p>Relationship list across nodes in {modeLabel} mode.</p>
-      <AppNav current="/app/views" />
-      <ViewScopeToggle basePath="/app/views/business" scope={scope} />
-      <ViewClientLoader mode="business" viewScope={scope} />
-      <nav>
-        <Link href={`/app/views${scopeQuery}`}>Views</Link> |{" "}
-        <Link href="/app/nodes">Nodes</Link>
-      </nav>
-    </main>
+    <AppShell
+      title={`Business Graph (${modeLabel})`}
+      description={`Relationship list across nodes in ${modeLabel} mode.`}
+    >
+      <Card>
+        <AppNav current="/app/views" />
+      </Card>
+      <Card title="Scope">
+        <ViewScopeToggle basePath="/app/views/business" scope={scope} />
+      </Card>
+      <Card title="Relationships">
+        <ViewClientLoader mode="business" viewScope={scope} />
+      </Card>
+      <Card>
+        <nav>
+          <Link href={`/app/views${scopeQuery}`}>Views</Link> |{" "}
+          <Link href="/app/nodes">Nodes</Link>
+        </nav>
+      </Card>
+    </AppShell>
   );
 }

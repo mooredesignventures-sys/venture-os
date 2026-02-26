@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import NodesDraftClientLoader from "./nodes-draft-client-loader";
 import AppNav from "../../../src/components/app-nav";
+import AppShell from "../../../src/components/ui/app-shell";
+import Card from "../../../src/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +17,21 @@ export default async function NodesPage() {
   }
 
   return (
-    <main>
-      <h1>Nodes (Draft)</h1>
-      <p>Draft only - DB will come after Master Spec.</p>
-      <p>Manage draft nodes, relationships, and local bundle actions.</p>
-      <AppNav current="/app/nodes" />
-      <NodesDraftClientLoader />
-      <p>
-        <Link href="/">Home</Link> | <Link href="/app">App area</Link>
-      </p>
-    </main>
+    <AppShell
+      title="Nodes (Draft)"
+      description="Draft only - DB will come after Master Spec."
+    >
+      <Card description="Manage draft nodes, relationships, and local bundle actions.">
+        <AppNav current="/app/nodes" />
+      </Card>
+      <Card title="Nodes Workspace">
+        <NodesDraftClientLoader />
+      </Card>
+      <Card>
+        <p>
+          <Link href="/">Home</Link> | <Link href="/app">App area</Link>
+        </p>
+      </Card>
+    </AppShell>
   );
 }

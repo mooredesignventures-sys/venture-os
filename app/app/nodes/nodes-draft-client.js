@@ -1725,7 +1725,10 @@ export default function NodesDraftClient() {
                   setRelationshipError("");
                 }}
               >
-                {node.title} ({node.type}) [{node.stage || normalizeStatus(node)}]
+                {node.title} ({node.type}){" "}
+                <span className="status-badge status-badge--stage">
+                  {node.stage || normalizeStatus(node)}
+                </span>
               </button>
             </li>
           ))}
@@ -1738,11 +1741,18 @@ export default function NodesDraftClient() {
       ) : (
         <div>
           <p>
-            Status: <strong>{selectedStage}</strong>{" "}
-            {selectedIsCommitted ? <span>Committed</span> : null}
+            Status:{" "}
+            <span className="status-badge status-badge--stage">{selectedStage}</span>{" "}
+            {selectedIsCommitted ? (
+              <span className="status-badge status-badge--committed">Committed</span>
+            ) : null}
           </p>
           <p>
-            Workflow status: <strong>{selectedNode.status}</strong> | Version:{" "}
+            Workflow status:{" "}
+            <span className="status-badge status-badge--workflow">
+              {selectedNode.status}
+            </span>{" "}
+            | Version:{" "}
             <strong>{selectedNode.version}</strong> | Created by:{" "}
             <strong>{selectedNode.createdBy}</strong>
           </p>
