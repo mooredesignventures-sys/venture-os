@@ -301,19 +301,14 @@ function appendAuditEntry(entry) {
   if (!normalizedEntry) {
     return;
   }
+  if (typeof normalizedEntry.timestamp !== "string") {
+    console.warn("[audit] entry timestamp is not a string", normalizedEntry);
+  }
+  if (typeof normalizedEntry.actor !== "string" || !normalizedEntry.actor) {
+    console.warn("[audit] entry actor is missing or not a string", normalizedEntry);
+  }
   const nextEntries = [...currentEntries, normalizedEntry];
   window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(nextEntries));
-}
-
-function clearAuditEntries() {
-  window.localStorage.removeItem(AUDIT_STORAGE_KEY);
-}
-
-function saveAuditEntries(entries) {
-  const normalizedEntries = entries
-    .map((entry) => normalizeAuditEvent(entry))
-    .filter((entry) => entry !== null);
-  window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(normalizedEntries));
 }
 
 function normalizeEdge(rawEdge, nodeById) {
@@ -1333,8 +1328,14 @@ export default function NodesDraftClient({ isFounder = false }) {
     const demoNodes = DEMO_NODES.map((node) => normalizeNode(node)).filter(
       (node) => node !== null
     );
+    appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      action: "DEMO_DATA_LOADED",
+      eventType: "DEMO_DATA_LOADED",
+      actor: AUDIT_ACTOR,
+      nodeCount: demoNodes.length,
+    });
     saveDraftNodes(demoNodes);
-    clearAuditEntries();
     setSelectedId(null);
     setBundleMessage("");
     setImportText("");
@@ -1356,8 +1357,13 @@ export default function NodesDraftClient({ isFounder = false }) {
       return;
     }
 
+    appendAuditEntry({
+      timestamp: new Date().toISOString(),
+      action: "RESET_REQUESTED",
+      eventType: "RESET_REQUESTED",
+      actor: AUDIT_ACTOR,
+    });
     saveDraftNodes([]);
-    clearAuditEntries();
     setSelectedId(null);
     setBundleMessage("");
     setImportText("");
@@ -1491,18 +1497,21 @@ export default function NodesDraftClient({ isFounder = false }) {
         simulation.normalizedEdges
       );
       saveDraftState(simulation.nodesWithEdges, simulation.normalizedEdges);
-      saveAuditEntries(
-        parsed.auditEvents.map((event) => ({
-          ...event,
-          actor: typeof event.actor === "string" ? event.actor : "unknown",
-          eventType:
-            typeof event.eventType === "string"
-              ? event.eventType
-              : typeof event.action === "string"
-                ? event.action
-                : "UNKNOWN_EVENT",
-        }))
-      );
+      appendAuditEntry({
+        timestamp: new Date().toISOString(),
+        action: "BUNDLE_IMPORTED_SNAPSHOT",
+        eventType: "BUNDLE_IMPORTED_SNAPSHOT",
+        actor: AUDIT_ACTOR,
+        importedAt: new Date().toISOString(),
+        bundleSchemaVersion: parsed?.metadata?.schemaVersion ?? null,
+        bundleAppVersion: parsed?.metadata?.appVersion ?? null,
+        bundleExportedAt: parsed?.metadata?.exportedAt ?? null,
+        bundleNodeCount: Array.isArray(parsed?.nodes) ? parsed.nodes.length : 0,
+        bundleEdgeCount: Array.isArray(parsed?.edges) ? parsed.edges.length : 0,
+        bundleAuditEventCount: Array.isArray(parsed?.auditEvents)
+          ? parsed.auditEvents.length
+          : 0,
+      });
       for (const edge of versionCreations) {
         appendAuditEntry({
           timestamp: new Date().toISOString(),
@@ -1773,7 +1782,7 @@ export default function NodesDraftClient({ isFounder = false }) {
           title="No draft nodes found."
           message="Load demo data or add your first draft node to get started."
           action={
-            <button type="button" onClick={handleLoadDemoData}>
+            <button type="button" onClick={handleLoadDemoData} disabled={!isFounder}>
               Load Demo Data
             </button>
           }
