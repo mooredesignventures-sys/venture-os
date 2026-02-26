@@ -5,6 +5,7 @@ import AuditClient from "./audit-client";
 import AppNav from "../../../src/components/app-nav";
 import AppShell from "../../../src/components/ui/app-shell";
 import Card from "../../../src/components/ui/card";
+import PageHeader from "../../../src/components/ui/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,13 @@ export default async function AuditPage() {
   return (
     <AppShell
       grid
-      title="Audit (Draft, Local)"
-      description="Local audit events for draft commit actions."
+      header={
+        <PageHeader
+          title="Audit (Draft, Local)"
+          meta="Local audit events for draft commit actions."
+          actions={<Link href="/app/nodes">Open Nodes</Link>}
+        />
+      }
     >
       <Card>
         <AppNav current="/app/audit" />
