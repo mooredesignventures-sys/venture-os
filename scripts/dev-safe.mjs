@@ -11,6 +11,7 @@ const NEXT_BIN = path.join(ROOT, "node_modules", "next", "dist", "bin", "next");
 const PREFERRED_PORT = 3000;
 const FALLBACK_PORT = 3001;
 const MAX_ATTEMPTS = 2;
+const IS_WINDOWS = process.platform === "win32";
 const TURBOPACK_FAILURE_MARKERS = [
   "Turbopack build failed",
   "inferred your workspace root",
@@ -18,6 +19,16 @@ const TURBOPACK_FAILURE_MARKERS = [
   "os error 1224",
   "compaction is already active",
 ];
+
+function initialMode() {
+  if (!IS_WINDOWS) {
+    return "turbopack";
+  }
+  if (process.env.VO_TURBO === "1") {
+    return "turbopack";
+  }
+  return "webpack";
+}
 
 function isPortFree(port) {
   return new Promise((resolve) => {
@@ -56,12 +67,17 @@ function hasTurbopackFailure(output) {
   return TURBOPACK_FAILURE_MARKERS.some((marker) => output.includes(marker));
 }
 
+function buildArgs(port, mode) {
+  const args = [NEXT_BIN, "dev", "-p", String(port)];
+  if (mode === "webpack") {
+    args.push("--webpack");
+  }
+  return args;
+}
+
 function startNextDev({ port, mode, attempt }) {
   return new Promise((resolve) => {
-    const args = [NEXT_BIN, "dev", "-p", String(port)];
-    if (mode === "webpack") {
-      args.push("--webpack");
-    }
+    const args = buildArgs(port, mode);
 
     console.log(
       `[dev:safe] Starting Next dev (${mode}) on port ${port} (attempt ${attempt}/${MAX_ATTEMPTS}).`
@@ -112,7 +128,11 @@ async function main() {
   let port = await resolveInitialPort();
   console.log(`[dev:safe] Local URL: http://localhost:${port}`);
 
-  let mode = "turbopack";
+  let mode = initialMode();
+  if (IS_WINDOWS && mode === "webpack") {
+    console.log("[dev:safe] Windows detected: defaulting to webpack mode (set VO_TURBO=1 to opt into Turbopack).");
+  }
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     if (!(await isPortFree(port)) && port === PREFERRED_PORT) {
       port = FALLBACK_PORT;
@@ -129,7 +149,7 @@ async function main() {
       process.exit(result.code || 1);
     }
 
-    if (result.turbopackFailure) {
+    if (mode === "turbopack" && result.turbopackFailure) {
       console.log("[dev:safe] Turbopack failure detected. Falling back to webpack dev mode.");
       mode = "webpack";
     } else {
@@ -142,3 +162,4 @@ async function main() {
 }
 
 main();
+
