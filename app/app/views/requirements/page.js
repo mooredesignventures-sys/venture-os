@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import ViewClientLoader from "../view-client-loader";
 import AppNav from "../../../../src/components/app-nav";
 import ViewScopeToggle from "../view-scope-toggle";
+import AppShell from "../../../../src/components/ui/app-shell";
+import Card from "../../../../src/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -20,16 +22,26 @@ export default async function RequirementsViewPage({ searchParams }) {
   }
 
   return (
-    <main>
-      <h1>Requirements Tree ({modeLabel})</h1>
-      <p>Requirement nodes with related items in {modeLabel} mode.</p>
-      <AppNav current="/app/views" />
-      <ViewScopeToggle basePath="/app/views/requirements" scope={scope} />
-      <ViewClientLoader mode="requirements" viewScope={scope} />
-      <nav>
-        <Link href={`/app/views${scopeQuery}`}>Views</Link> |{" "}
-        <Link href="/app/nodes">Nodes</Link>
-      </nav>
-    </main>
+    <AppShell
+      grid
+      title={`Requirements Tree (${modeLabel})`}
+      description={`Requirement nodes with related items in ${modeLabel} mode.`}
+    >
+      <Card>
+        <AppNav current="/app/views" />
+      </Card>
+      <Card title="Scope Filter">
+        <ViewScopeToggle basePath="/app/views/requirements" scope={scope} />
+      </Card>
+      <Card title="Requirements Graph">
+        <ViewClientLoader mode="requirements" viewScope={scope} />
+      </Card>
+      <Card>
+        <nav>
+          <Link href={`/app/views${scopeQuery}`}>Views</Link> |{" "}
+          <Link href="/app/nodes">Nodes</Link>
+        </nav>
+      </Card>
+    </AppShell>
   );
 }

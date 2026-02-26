@@ -23,13 +23,14 @@ export default async function BusinessViewPage({ searchParams }) {
 
   return (
     <AppShell
+      grid
       title={`Business Graph (${modeLabel})`}
       description={`Relationship list across nodes in ${modeLabel} mode.`}
     >
       <Card>
         <AppNav current="/app/views" />
       </Card>
-      <Card title="Scope">
+      <Card title="Scope Filter">
         <ViewScopeToggle basePath="/app/views/business" scope={scope} />
       </Card>
       <Card title="Relationships">

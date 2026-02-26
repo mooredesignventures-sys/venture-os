@@ -15,9 +15,9 @@ export function CardContent({ children }) {
   return <div className="ui-card__content">{children}</div>;
 }
 
-export default function Card({ title, description, children }) {
+export default function Card({ title, description, children, className = "" }) {
   return (
-    <section className="ui-card vo-surface">
+    <section className={`ui-card vo-surface${className ? ` ${className}` : ""}`}>
       <CardHeader title={title} description={description} />
       <CardContent>{children}</CardContent>
     </section>

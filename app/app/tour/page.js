@@ -2,6 +2,8 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import AppNav from "../../../src/components/app-nav";
+import AppShell from "../../../src/components/ui/app-shell";
+import Card from "../../../src/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -14,44 +16,52 @@ export default async function TourPage() {
   }
 
   return (
-    <main>
-      <h1>Guided Tour (2 minutes)</h1>
-      <p>Follow these steps to walk through the draft prototype.</p>
-      <AppNav current="/app/tour" />
-      <ol>
-        <li>
-          Open <Link href="/app/nodes">Nodes</Link> and click <strong>Load Demo Data</strong>.
-        </li>
-        <li>
-          In <Link href="/app/nodes">Nodes</Link>, create or edit a node.
-        </li>
-        <li>
-          In node detail, add a relationship to another node.
-        </li>
-        <li>
-          Open <Link href="/app/views/decisions">Decisions</Link>,{" "}
-          <Link href="/app/views/requirements">Requirements</Link>, and{" "}
-          <Link href="/app/views/business">Business</Link> views.
-        </li>
-        <li>
-          In <Link href="/app/nodes">Nodes</Link>, commit a node (it becomes locked).
-        </li>
-        <li>
-          Open <Link href="/app/audit">Audit</Link> to see commit events.
-        </li>
-        <li>
-          In <Link href="/app/nodes">Nodes</Link>, click <strong>Export Bundle (JSON)</strong>.
-        </li>
-        <li>
-          In <Link href="/app/nodes">Nodes</Link>, click{" "}
-          <strong>Reset (clear all local data)</strong>.
-        </li>
-      </ol>
-      <nav>
-        <Link href="/app">App area</Link> | <Link href="/app/nodes">Nodes</Link> |{" "}
-        <Link href="/app/views">Views</Link> | <Link href="/app/proposals">Proposals</Link> |{" "}
-        <Link href="/app/audit">Audit</Link>
-      </nav>
-    </main>
+    <AppShell
+      grid
+      title="Guided Tour (2 minutes)"
+      description="Follow the sequence to explore nodes, views, and audit behavior."
+    >
+      <Card>
+        <AppNav current="/app/tour" />
+      </Card>
+      <Card title="Walkthrough">
+        <ol>
+          <li>
+            Open <Link href="/app/nodes">Nodes</Link> and click <strong>Load Demo Data</strong>.
+          </li>
+          <li>
+            In <Link href="/app/nodes">Nodes</Link>, create or edit a node.
+          </li>
+          <li>
+            In node detail, add a relationship to another node.
+          </li>
+          <li>
+            Open <Link href="/app/views/decisions">Decisions</Link>,{" "}
+            <Link href="/app/views/requirements">Requirements</Link>, and{" "}
+            <Link href="/app/views/business">Business</Link> views.
+          </li>
+          <li>
+            In <Link href="/app/nodes">Nodes</Link>, commit a node (it becomes locked).
+          </li>
+          <li>
+            Open <Link href="/app/audit">Audit</Link> to see commit events.
+          </li>
+          <li>
+            In <Link href="/app/nodes">Nodes</Link>, click <strong>Export Bundle (JSON)</strong>.
+          </li>
+          <li>
+            In <Link href="/app/nodes">Nodes</Link>, click{" "}
+            <strong>Reset (clear all local data)</strong>.
+          </li>
+        </ol>
+      </Card>
+      <Card>
+        <nav>
+          <Link href="/app">App area</Link> | <Link href="/app/nodes">Nodes</Link> |{" "}
+          <Link href="/app/views">Views</Link> | <Link href="/app/proposals">Proposals</Link> |{" "}
+          <Link href="/app/audit">Audit</Link>
+        </nav>
+      </Card>
+    </AppShell>
   );
 }

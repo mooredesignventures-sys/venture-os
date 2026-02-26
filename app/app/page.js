@@ -19,41 +19,44 @@ export default async function AppPage() {
   return (
     <AppShell
       grid
-      title="App Workspace"
-      description="Navigate prototype areas quickly."
+      title="Workspace Command Center"
+      description="Launch operations areas with a consistent war-room control surface."
     >
       <Card>
         <AppNav current="/app" />
       </Card>
-      <Card title="Areas" description="Core prototype sections">
-        <p>
-          <Link href="/app/nodes">Nodes (Draft)</Link>
-        </p>
-        <p>
-          <Link href="/app/views">Views (Draft)</Link>
-        </p>
-        <p>
-          <Link href="/app/proposals">Guided Proposals (Draft)</Link>
-        </p>
-        <p>
-          <Link href="/app/brainstorm">Brainstorm (Draft)</Link>
-        </p>
-        <p>
-          <Link href="/app/audit">Audit (Draft, Local)</Link>
-        </p>
-        <p>
-          <Link href="/app/tour">Tour</Link>
-        </p>
-      </Card>
-      <Card title="Session">
-        <ExitButton />
-      </Card>
-      <Card>
-        <nav>
-          <Link href="/">Home</Link> | <Link href="/app">App area</Link> |{" "}
-          <Link href="/login">Login</Link>
-        </nav>
-      </Card>
+      <section className="workspace-grid">
+        <Card
+          title="Operations"
+          description="Primary product surfaces for strategy, graph editing, and review."
+        >
+          <div className="workspace-links">
+            <Link href="/app/brainstorm">Brainstorm Engine</Link>
+            <Link href="/app/nodes">Nodes Workspace</Link>
+            <Link href="/app/views">Views Console</Link>
+            <Link href="/app/proposals">Council Proposals</Link>
+            <Link href="/app/audit">Audit Trail</Link>
+            <Link href="/app/tour">Guided Tour</Link>
+          </div>
+        </Card>
+        <Card title="Route Status" description="Quick links for local checks.">
+          <p>
+            <Link href="/login">/login</Link>
+          </p>
+          <p>
+            <Link href="/app">/app</Link>
+          </p>
+          <p>
+            <Link href="/app/brainstorm">/app/brainstorm</Link>
+          </p>
+          <p>
+            <Link href="/app/nodes">/app/nodes</Link>
+          </p>
+        </Card>
+        <Card title="Session Control" description="Reset your temporary access session.">
+          <ExitButton />
+        </Card>
+      </section>
     </AppShell>
   );
 }
