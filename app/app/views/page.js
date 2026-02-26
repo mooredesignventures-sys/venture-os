@@ -23,27 +23,21 @@ export default async function ViewsPage({ searchParams }) {
   return (
     <AppShell
       grid
-      title={`Views (${modeLabel})`}
-      description={`Review decision, requirement, and relationship snapshots in ${modeLabel} mode.`}
+      title={`Workspace Views (${modeLabel})`}
+      description={`Review decision, requirement, and business graph snapshots in ${modeLabel} mode.`}
     >
       <Card>
         <AppNav current="/app/views" />
       </Card>
-      <Card title="Scope">
+      <Card title="Scope Filter">
         <ViewScopeToggle basePath="/app/views" scope={scope} />
       </Card>
       <Card title="Available Views">
-        <ul>
-          <li>
-            <Link href={`/app/views/decisions${scopeQuery}`}>Decision Tree</Link>
-          </li>
-          <li>
-            <Link href={`/app/views/requirements${scopeQuery}`}>Requirements Tree</Link>
-          </li>
-          <li>
-            <Link href={`/app/views/business${scopeQuery}`}>Business Graph</Link>
-          </li>
-        </ul>
+        <div className="view-links">
+          <Link href={`/app/views/decisions${scopeQuery}`}>Decision Tree</Link>
+          <Link href={`/app/views/requirements${scopeQuery}`}>Requirements Tree</Link>
+          <Link href={`/app/views/business${scopeQuery}`}>Business Graph</Link>
+        </div>
       </Card>
     </AppShell>
   );

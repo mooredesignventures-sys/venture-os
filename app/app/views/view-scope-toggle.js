@@ -4,16 +4,16 @@ export default function ViewScopeToggle({ basePath, scope = "draft" }) {
   const isCommittedOnly = scope === "committed";
 
   return (
-    <p>
+    <p className="vo-meta">
       View mode:{" "}
       {isCommittedOnly ? (
         <Link href={basePath}>Draft</Link>
       ) : (
-        <strong>Draft</strong>
+        <strong className="status-badge">Draft</strong>
       )}{" "}
       |{" "}
       {isCommittedOnly ? (
-        <strong>Committed only</strong>
+        <strong className="status-badge status-badge--committed">Committed only</strong>
       ) : (
         <Link href={`${basePath}?scope=committed`}>Committed only</Link>
       )}
