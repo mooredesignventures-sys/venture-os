@@ -191,6 +191,22 @@ function buildExpertsFromBundle(nodes, idea) {
   }));
 }
 
+function toRecruitErrorMessage(error) {
+  const message = error instanceof Error ? error.message : "";
+  const lowered = message.toLowerCase();
+
+  if (
+    (error instanceof Error && error.name === "AbortError") ||
+    lowered.includes("failed to fetch") ||
+    lowered.includes("networkerror") ||
+    lowered.includes("load failed")
+  ) {
+    return "Server not reachable — is dev server running?";
+  }
+
+  return message || "Failed to recruit experts.";
+}
+
 export default function CouncilClient() {
   const [ideaInput, setIdeaInput] = useState("");
   const [recruiting, setRecruiting] = useState(false);
@@ -207,7 +223,10 @@ export default function CouncilClient() {
     setStoredExpertCount(experts.length);
   }
 
-  async function handleRecruitExperts() {
+  async function handleRecruitExperts(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+
     const idea = ideaInput.trim();
     if (!idea) {
       setRecruitError("Enter a high-level idea before recruiting experts.");
@@ -218,18 +237,33 @@ export default function CouncilClient() {
     setRecruitResult("");
     setRecruiting(true);
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
     try {
       const response = await fetch("/api/ai/draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           mode: "business",
           prompt: `${idea}\nReturn 6-8 expert roles with focus for council recruitment.`,
         }),
       });
-      const data = await response.json().catch(() => ({}));
+
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
       if (!response.ok || !data?.ok || !data?.bundle) {
-        throw new Error(data?.error || "Failed to recruit experts.");
+        const reason =
+          typeof data?.error === "string" && data.error
+            ? data.error
+            : `Recruit request failed (${response.status})`;
+        throw new Error(reason);
       }
 
       const experts = buildExpertsFromBundle(data.bundle.nodes, idea);
@@ -240,33 +274,42 @@ export default function CouncilClient() {
         expertCount: experts.length,
       });
     } catch (error) {
-      setRecruitError(error instanceof Error ? error.message : "Failed to recruit experts.");
+      setRecruitError(toRecruitErrorMessage(error));
     } finally {
+      clearTimeout(timeout);
       setRecruiting(false);
     }
   }
 
-  function handleRecruitToBrainstorm() {
+  function handleRecruitToBrainstorm(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+
     if (recruitPreview.length === 0) {
       return;
     }
 
-    const existing = loadStoredArray(RECRUITED_EXPERTS_STORAGE_KEY);
-    const existingIds = new Set(existing.map((item) => item?.id).filter(Boolean));
-    const additions = recruitPreview.filter(
-      (expert) => expert?.id && !existingIds.has(expert.id),
-    );
-    const next = [...existing, ...additions];
-    window.localStorage.setItem(RECRUITED_EXPERTS_STORAGE_KEY, JSON.stringify(next));
+    try {
+      const existing = loadStoredArray(RECRUITED_EXPERTS_STORAGE_KEY);
+      const existingIds = new Set(existing.map((item) => item?.id).filter(Boolean));
+      const additions = recruitPreview.filter(
+        (expert) => expert?.id && !existingIds.has(expert.id),
+      );
+      const next = [...existing, ...additions];
+      window.localStorage.setItem(RECRUITED_EXPERTS_STORAGE_KEY, JSON.stringify(next));
 
-    appendAuditEvent("AI_EXPERTS_RECRUITED", {
-      addedExperts: additions.length,
-      totalExperts: next.length,
-    });
-    refreshStoredExpertCount();
-    setRecruitResult(
-      `Recruited to Brainstorm: addedExperts=${additions.length}, totalExperts=${next.length}`,
-    );
+      appendAuditEvent("AI_EXPERTS_RECRUITED", {
+        addedExperts: additions.length,
+        totalExperts: next.length,
+      });
+      refreshStoredExpertCount();
+      setRecruitResult(
+        `Recruited to Brainstorm: addedExperts=${additions.length}, totalExperts=${next.length}`,
+      );
+      setRecruitError("");
+    } catch (error) {
+      setRecruitError(toRecruitErrorMessage(error));
+    }
   }
 
   useEffect(() => {
@@ -320,31 +363,32 @@ export default function CouncilClient() {
       </Card>
 
       <Card title="AI Recruiter" description="Generate expert panel from a high-level idea (UI-only storage).">
-        <textarea
-          value={ideaInput}
-          onChange={(event) => setIdeaInput(event.target.value)}
-          placeholder="Enter high-level idea (e.g. Land registry app for investors)"
-          className="h-20 w-full rounded-xl border border-red-900/40 bg-neutral-900 p-3 text-sm text-slate-100 outline-none"
-        />
+        <form onSubmit={handleRecruitExperts}>
+          <textarea
+            value={ideaInput}
+            onChange={(event) => setIdeaInput(event.target.value)}
+            placeholder="Enter high-level idea (e.g. Land registry app for investors)"
+            className="h-20 w-full rounded-xl border border-red-900/40 bg-neutral-900 p-3 text-sm text-slate-100 outline-none"
+          />
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={handleRecruitExperts}
-            disabled={recruiting}
-            className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-sm text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {recruiting ? "Recruiting..." : "Recruit Experts"}
-          </button>
-          <button
-            type="button"
-            onClick={handleRecruitToBrainstorm}
-            disabled={recruitPreview.length === 0}
-            className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Recruit to Brainstorm
-          </button>
-        </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={recruiting}
+              className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-sm text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {recruiting ? "Recruiting..." : "Recruit Experts"}
+            </button>
+            <button
+              type="button"
+              onClick={handleRecruitToBrainstorm}
+              disabled={recruitPreview.length === 0}
+              className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Recruit to Brainstorm
+            </button>
+          </div>
+        </form>
 
         <div className="mt-3 text-xs text-slate-400">
           Stored recruited experts: {storedExpertCount}
