@@ -176,9 +176,11 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   );
 
   const decisionNodes = filteredNodes.filter((node) => node.type === "Decision");
-  const requirementNodes = filteredNodes.filter(
-    (node) => node.type === "Requirement"
-  );
+  const requirementNodes = filteredNodes.filter((node) => node.type === "Requirement");
+  const proposedRequirementNodes = requirementNodes.filter((node) => {
+    const stage = typeof node.stage === "string" ? node.stage.toLowerCase() : "";
+    return stage === "proposed" && node.archived !== true;
+  });
 
   const relationships = buildRelationships(filteredNodes, activeEdges);
 
@@ -295,7 +297,40 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   }
 
   if (mode === "requirements") {
-    return renderTree(requirementNodes);
+    return (
+      <section>
+        <p>Proposed requirements: {proposedRequirementNodes.length}</p>
+        {proposedRequirementNodes.length === 0 ? (
+          <EmptyState
+            title="No proposed requirements found."
+            message="Generate and apply a brainstorm draft to populate this list."
+          />
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Risk</th>
+                <th>Status</th>
+                <th>Version</th>
+                <th>Owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              {proposedRequirementNodes.map((node) => (
+                <tr key={node.id}>
+                  <td>{node.title}</td>
+                  <td>{node.risk || "-"}</td>
+                  <td>{node.status || "-"}</td>
+                  <td>{node.version ?? "-"}</td>
+                  <td>{node.owner || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    );
   }
 
   return (
