@@ -12,6 +12,7 @@
     "dev:turbo": "node -e \"console.error('Turbopack disabled. Use npm run dev:safe'); process.exit(1)\"",
     "dev:safe": "node scripts/dev-safe.mjs",
     "dev:verify": "node scripts/verify-dev-url.mjs",
+    "beta:certify": "node scripts/beta-certify.mjs",
     "check:node": "node scripts/check-node.mjs",
     "install:clean": "node scripts/install-clean.mjs",
     "build": "next build",
