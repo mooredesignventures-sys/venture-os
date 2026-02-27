@@ -11,6 +11,7 @@ import Card, { CardContent } from "../../../src/components/ui/card";
 const DRAFT_NODE_STORAGE_KEY = "draft_nodes";
 const DRAFT_EDGE_STORAGE_KEY = "draft_edges";
 const RECRUITED_EXPERTS_STORAGE_KEY = "recruited_experts";
+const BASELINE_SNAPSHOT_STORAGE_KEY = "baseline_snapshots";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
 const FALLBACK_AUDIT_STORAGE_KEY = "audit_events";
 
@@ -167,6 +168,9 @@ function formatAuditPayload(payload) {
   if (typeof payload.recruitedExpertCount === "number") {
     details.push(`experts=${payload.recruitedExpertCount}`);
   }
+  if (typeof payload.baselineId === "string" && payload.baselineId) {
+    details.push(`baseline=${payload.baselineId}`);
+  }
   if (typeof payload.nonce === "string" && payload.nonce) {
     details.push(`nonce=${payload.nonce}`);
   }
@@ -206,6 +210,7 @@ export default function BrainstormClient() {
   const [draftError, setDraftError] = useState("");
   const [draftResult, setDraftResult] = useState(null);
   const [applyResult, setApplyResult] = useState(null);
+  const [baselineResult, setBaselineResult] = useState(null);
   const [auditEvents, setAuditEvents] = useState([]);
   const [recruitedExperts, setRecruitedExperts] = useState([]);
   const [decisionFilter, setDecisionFilter] = useState("All");
@@ -474,6 +479,103 @@ export default function BrainstormClient() {
       addedEdges,
       totalNodes: nextNodes.length,
       totalEdges: nextEdges.length,
+    });
+  }
+
+  function buildBrainstormSummary() {
+    const lines = [];
+
+    if (draftPrompt.trim()) {
+      lines.push(`Prompt focus: ${draftPrompt.trim().slice(0, 120)}`);
+    }
+
+    lines.push(`Total active ideas: ${ideasState.length}`);
+
+    const clusters = Array.from(
+      ideasState.reduce((map, item) => {
+        const key = item?.cluster || "General";
+        map.set(key, (map.get(key) || 0) + 1);
+        return map;
+      }, new Map()),
+    )
+      .map(([cluster, count]) => `${cluster} ${count}`)
+      .slice(0, 3);
+    if (clusters.length > 0) {
+      lines.push(`Top clusters: ${clusters.join(", ")}`);
+    }
+
+    const sampleIdeas = ideasState
+      .slice(0, 2)
+      .map((item) => item?.label)
+      .filter(Boolean);
+    if (sampleIdeas.length > 0) {
+      lines.push(`Sample ideas: ${sampleIdeas.join(" | ")}`);
+    }
+
+    lines.push(`Recruited experts in context: ${recruitedExperts.length}`);
+
+    return lines.slice(0, 5).map((line) => `- ${line}`).join("\n");
+  }
+
+  function handleCloseBrainstormBaseline() {
+    const idea =
+      draftPrompt.trim() ||
+      message.trim() ||
+      ideasState[0]?.label ||
+      "Untitled baseline";
+    const createdAt = new Date().toISOString();
+    const baselineId = `baseline:${Date.now()}`;
+    const summary = buildBrainstormSummary();
+    const experts = recruitedExperts.map((expert) => ({
+      id: expert.id,
+      title: expert.title,
+      focusAreas: Array.isArray(expert.focusAreas) ? expert.focusAreas : [],
+    }));
+
+    const gravitySnapshot = {
+      ideaCount: ideasState.length,
+      nodes: nodes.slice(0, 10).map((node) => ({
+        id: node.id,
+        title: node.label,
+        cluster: node.cluster,
+        x: Math.round(node.x),
+        y: Math.round(node.y),
+      })),
+    };
+
+    const baseline = {
+      id: baselineId,
+      type: "Baseline",
+      title: `Baseline: ${idea.slice(0, 60)}`,
+      stage: "proposed",
+      status: "queued",
+      version: 1,
+      createdAt,
+      createdBy: "ai",
+      owner: "founder",
+      risk: "medium",
+      parentId: null,
+      archived: false,
+      idea,
+      experts,
+      brainstormSummary: summary,
+      gravitySnapshot,
+    };
+
+    const existing = readStoredArray(BASELINE_SNAPSHOT_STORAGE_KEY);
+    const next = [...existing, baseline];
+    window.localStorage.setItem(BASELINE_SNAPSHOT_STORAGE_KEY, JSON.stringify(next));
+
+    setBaselineResult({
+      id: baselineId,
+      title: baseline.title,
+      expertCount: experts.length,
+    });
+
+    appendAuditEvent("BASELINE_CREATED", {
+      baselineId,
+      expertCount: experts.length,
+      summaryLength: summary.length,
     });
   }
 
@@ -879,6 +981,13 @@ export default function BrainstormClient() {
                 >
                   Apply to Draft Graph
                 </button>
+                <button
+                  type="button"
+                  onClick={handleCloseBrainstormBaseline}
+                  className="rounded-xl border border-amber-700/50 bg-amber-900/20 px-4 py-2 text-sm text-amber-100 hover:border-amber-400"
+                >
+                  Close Brainstorm (Create Baseline)
+                </button>
               </div>
 
               {draftError ? (
@@ -892,6 +1001,13 @@ export default function BrainstormClient() {
                   Applied draft bundle: addedNodes={applyResult.addedNodes}, addedEdges=
                   {applyResult.addedEdges}, totalNodes={applyResult.totalNodes}, totalEdges=
                   {applyResult.totalEdges}
+                </div>
+              ) : null}
+
+              {baselineResult ? (
+                <div className="mt-3 rounded-xl border border-cyan-700/60 bg-cyan-900/20 px-3 py-2 text-xs text-cyan-100">
+                  Baseline created: {baselineResult.title} (id={baselineResult.id}, experts=
+                  {baselineResult.expertCount})
                 </div>
               ) : null}
 
