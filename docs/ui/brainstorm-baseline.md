@@ -15,6 +15,7 @@
 ## Provenance
 
 - Brainstorm maturity PR: https://github.com/mooredesignventures-sys/venture-os/pull/53
+- Docs hardening PR: https://github.com/mooredesignventures-sys/venture-os/pull/54 (MERGED)
 - Maturity tag: brainstorm-maturity-v1 (commit d9d528a)
 - Baseline lock commit: 739f100
 
