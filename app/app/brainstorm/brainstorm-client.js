@@ -143,7 +143,9 @@ function useGravityNodes(items, arenaRef) {
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
   const [decisionFilter, setDecisionFilter] = useState("All");
+  const [fullscreen, setFullscreen] = useState(null);
   const arenaRef = useRef(null);
+  const fullscreenArenaRef = useRef(null);
   const nextIdeaIdRef = useRef(1000);
 
   const team = useMemo(
@@ -189,7 +191,8 @@ export default function BrainstormClient() {
     return decisions.filter((entry) => entry.state === decisionFilter);
   }, [decisionFilter, decisions]);
 
-  const nodes = useGravityNodes(ideasState, arenaRef);
+  const activeArenaRef = fullscreen === "map" ? fullscreenArenaRef : arenaRef;
+  const nodes = useGravityNodes(ideasState, activeArenaRef);
 
   function handleNewIdea() {
     const newIdea = {
@@ -198,6 +201,207 @@ export default function BrainstormClient() {
       cluster: "Core",
     };
     setIdeasState((previous) => [newIdea, ...previous]);
+  }
+
+  function openFullscreen(mode) {
+    setFullscreen(mode);
+  }
+
+  function closeFullscreen() {
+    setFullscreen(null);
+  }
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === "Escape") {
+        closeFullscreen();
+      }
+    }
+
+    if (fullscreen) {
+      window.addEventListener("keydown", onKeyDown);
+    }
+
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if (!fullscreen) {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [fullscreen]);
+
+  function renderMapPanel(mode) {
+    const isFullscreen = mode === "fullscreen";
+
+    return (
+      <Card
+        className={classNames(
+          "rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl",
+          isFullscreen ? "h-full" : "",
+        )}
+      >
+        <CardContent>
+          <div className={classNames(isFullscreen ? "flex h-full min-h-0 flex-col" : "")}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-red-400">Idea Gravity Map</div>
+                <div className="text-[11px] text-slate-400">UI-only drift - no drag yet</div>
+              </div>
+              <div className="flex gap-2">
+                <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-3 py-2 text-xs hover:border-amber-400">
+                  Branch Topic
+                </button>
+                <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-3 py-2 text-xs hover:border-amber-400">
+                  Merge Themes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openFullscreen("map")}
+                  className="rounded-xl border border-red-900/40 bg-neutral-900 px-3 py-2 text-xs hover:border-amber-400"
+                >
+                  Fullscreen
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={isFullscreen ? fullscreenArenaRef : arenaRef}
+              className={classNames(
+                "relative mt-4 overflow-hidden rounded-2xl border border-red-900/40 bg-gradient-to-b from-neutral-900/60 to-neutral-950",
+                isFullscreen ? "h-full min-h-0 flex-1" : "h-[300px]",
+              )}
+              style={{ perspective: "900px" }}
+            >
+              <div
+                className="absolute inset-0 opacity-[0.18]"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px)",
+                  backgroundSize: "56px 56px",
+                }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-br from-black/35 via-transparent to-black/60" />
+
+              {nodes.map((node, index) => (
+                <div
+                  key={node.id}
+                  className="absolute -translate-x-1/2 -translate-y-1/2"
+                  style={{
+                    left: node.x,
+                    top: node.y,
+                    transform: `translate(-50%, -50%) translateZ(${(index % 5) * 4}px)`,
+                  }}
+                >
+                  <div className="w-[220px] rounded-xl border border-red-900/45 bg-neutral-950/90 p-2 shadow-xl">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="truncate text-[11px] font-semibold text-slate-200">
+                        {node.label}
+                      </div>
+                      <span
+                        className={classNames(
+                          "rounded-md border px-1.5 py-0.5 text-[9px]",
+                          clusterPill(node.cluster),
+                        )}
+                      >
+                        {node.cluster}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <button
+                type="button"
+                onClick={handleNewIdea}
+                className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-white shadow-lg"
+              >
+                New Idea
+              </button>
+              <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
+                Branch Topic
+              </button>
+              <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
+                Merge Themes
+              </button>
+              <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
+                Park Idea
+              </button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function renderChatPanel(mode) {
+    const isFullscreen = mode !== "normal";
+    const isMapFullscreen = mode === "mapFullscreen";
+
+    return (
+      <Card
+        className={classNames(
+          "rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl",
+          isMapFullscreen ? "h-full" : "",
+        )}
+      >
+        <CardContent>
+          <div className={classNames(isMapFullscreen ? "flex h-full min-h-0 flex-col" : "")}>
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-red-400">Founder - Team Chat</div>
+              <button
+                type="button"
+                onClick={() => openFullscreen("chat")}
+                className="rounded-xl border border-red-900/40 bg-neutral-900 px-3 py-1.5 text-xs hover:border-amber-400"
+              >
+                Fullscreen
+              </button>
+            </div>
+            <div
+              className={classNames(
+                "mt-3 overflow-auto rounded-2xl border border-red-900/25 bg-neutral-900/70 p-2 text-sm text-slate-200",
+                isMapFullscreen ? "h-full min-h-0 flex-1" : "",
+                isFullscreen && !isMapFullscreen ? "h-[65vh]" : "",
+                !isFullscreen ? "h-20" : "",
+              )}
+            >
+              <div>
+                <span className="font-medium text-red-400">Founder:</span> Lock next 3 decisions to
+                raise stability.
+              </div>
+              <div className="mt-1">
+                <span className="font-medium text-amber-300">Governance:</span> Confirm decision
+                object model fields.
+              </div>
+              <div className="mt-1">
+                <span className="font-medium text-indigo-300">Tech:</span> Ensure no silent
+                refactors on builds.
+              </div>
+            </div>
+            <div className="mt-3 flex gap-3">
+              <input
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                className="flex-1 rounded-xl border border-red-900/25 bg-neutral-900 px-4 py-2 text-sm outline-none"
+                placeholder="Message the team..."
+              />
+              <button className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-5 py-2 text-white shadow-lg">
+                Send
+              </button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -314,118 +518,8 @@ export default function BrainstormClient() {
         </div>
 
         <div className="space-y-6 md:col-span-6">
-          <Card className="rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl">
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-red-400">Idea Gravity Map</div>
-                  <div className="text-[11px] text-slate-400">UI-only drift - no drag yet</div>
-                </div>
-                <div className="flex gap-2">
-                  <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-3 py-2 text-xs hover:border-amber-400">
-                    Branch Topic
-                  </button>
-                  <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-3 py-2 text-xs hover:border-amber-400">
-                    Merge Themes
-                  </button>
-                </div>
-              </div>
-
-              <div
-                ref={arenaRef}
-                className="relative mt-4 h-[300px] overflow-hidden rounded-2xl border border-red-900/40 bg-gradient-to-b from-neutral-900/60 to-neutral-950"
-                style={{ perspective: "900px" }}
-              >
-                <div
-                  className="absolute inset-0 opacity-[0.18]"
-                  style={{
-                    backgroundImage:
-                      "linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px)",
-                    backgroundSize: "56px 56px",
-                  }}
-                />
-                <div className="absolute inset-0 bg-gradient-to-br from-black/35 via-transparent to-black/60" />
-
-                {nodes.map((node, index) => (
-                  <div
-                    key={node.id}
-                    className="absolute -translate-x-1/2 -translate-y-1/2"
-                    style={{
-                      left: node.x,
-                      top: node.y,
-                      transform: `translate(-50%, -50%) translateZ(${(index % 5) * 4}px)`,
-                    }}
-                  >
-                    <div className="w-[220px] rounded-xl border border-red-900/45 bg-neutral-950/90 p-2 shadow-xl">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="truncate text-[11px] font-semibold text-slate-200">
-                          {node.label}
-                        </div>
-                        <span
-                          className={classNames(
-                            "rounded-md border px-1.5 py-0.5 text-[9px]",
-                            clusterPill(node.cluster),
-                          )}
-                        >
-                          {node.cluster}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                <button
-                  type="button"
-                  onClick={handleNewIdea}
-                  className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-white shadow-lg"
-                >
-                  New Idea
-                </button>
-                <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
-                  Branch Topic
-                </button>
-                <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
-                  Merge Themes
-                </button>
-                <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
-                  Park Idea
-                </button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl">
-            <CardContent>
-              <div className="text-sm font-semibold text-red-400">Founder - Team Chat</div>
-              <div className="mt-3 h-20 overflow-auto rounded-2xl border border-red-900/25 bg-neutral-900/70 p-2 text-sm text-slate-200">
-                <div>
-                  <span className="font-medium text-red-400">Founder:</span> Lock next 3 decisions
-                  to raise stability.
-                </div>
-                <div className="mt-1">
-                  <span className="font-medium text-amber-300">Governance:</span> Confirm decision
-                  object model fields.
-                </div>
-                <div className="mt-1">
-                  <span className="font-medium text-indigo-300">Tech:</span> Ensure no silent
-                  refactors on builds.
-                </div>
-              </div>
-              <div className="mt-3 flex gap-3">
-                <input
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                  className="flex-1 rounded-xl border border-red-900/25 bg-neutral-900 px-4 py-2 text-sm outline-none"
-                  placeholder="Message the team..."
-                />
-                <button className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-5 py-2 text-white shadow-lg">
-                  Send
-                </button>
-              </div>
-            </CardContent>
-          </Card>
+          {renderMapPanel("normal")}
+          {renderChatPanel("normal")}
         </div>
 
         <div className="md:col-span-3">
@@ -475,6 +569,35 @@ export default function BrainstormClient() {
           </Card>
         </div>
       </div>
+
+      {fullscreen ? (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="h-[90vh] w-[95vw] max-w-6xl rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-red-900/40 px-4 py-3">
+              <div className="text-sm font-semibold text-red-300">
+                {fullscreen === "map" ? "Gravity Map (Fullscreen)" : "Chat (Fullscreen)"}
+              </div>
+              <button
+                type="button"
+                onClick={closeFullscreen}
+                className="rounded-xl border border-red-900/40 bg-neutral-900 px-3 py-1.5 text-xs hover:border-amber-400"
+              >
+                Close
+              </button>
+            </div>
+            <div className="h-[calc(90vh-57px)] overflow-hidden p-4">
+              {fullscreen === "map" ? (
+                <div className="flex h-full flex-col gap-4">
+                  <div className="min-h-0 flex-1">{renderMapPanel("fullscreen")}</div>
+                  <div className="h-[28vh] min-h-[220px]">{renderChatPanel("mapFullscreen")}</div>
+                </div>
+              ) : (
+                <div className="h-full">{renderChatPanel("fullscreen")}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
