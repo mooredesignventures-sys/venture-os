@@ -10,6 +10,7 @@ import Card, { CardContent } from "../../../src/components/ui/card";
 
 const DRAFT_NODE_STORAGE_KEY = "draft_nodes";
 const DRAFT_EDGE_STORAGE_KEY = "draft_edges";
+const RECRUITED_EXPERTS_STORAGE_KEY = "recruited_experts";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
 const FALLBACK_AUDIT_STORAGE_KEY = "audit_events";
 
@@ -163,6 +164,9 @@ function formatAuditPayload(payload) {
   if (typeof payload.addedEdges === "number") {
     details.push(`addedEdges=${payload.addedEdges}`);
   }
+  if (typeof payload.recruitedExpertCount === "number") {
+    details.push(`experts=${payload.recruitedExpertCount}`);
+  }
   if (typeof payload.nonce === "string" && payload.nonce) {
     details.push(`nonce=${payload.nonce}`);
   }
@@ -173,6 +177,28 @@ function formatAuditPayload(payload) {
   return details.join(" • ");
 }
 
+function readRecruitedExperts() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(RECRUITED_EXPERTS_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (item) => item?.type === "Expert" && item?.stage === "proposed" && item?.archived !== true,
+    );
+  } catch {
+    return [];
+  }
+}
+
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -181,6 +207,7 @@ export default function BrainstormClient() {
   const [draftResult, setDraftResult] = useState(null);
   const [applyResult, setApplyResult] = useState(null);
   const [auditEvents, setAuditEvents] = useState([]);
+  const [recruitedExperts, setRecruitedExperts] = useState([]);
   const [decisionFilter, setDecisionFilter] = useState("All");
   const [fullscreen, setFullscreen] = useState(null);
   const arenaRef = useRef(null);
@@ -338,7 +365,18 @@ export default function BrainstormClient() {
     setApplyResult(null);
 
     try {
-      const body = { prompt, mode: "requirements" };
+      const expertContext =
+        recruitedExperts.length > 0
+          ? `\nCouncil experts:\n${recruitedExperts
+              .map((expert) => {
+                const focus = Array.isArray(expert.focusAreas)
+                  ? expert.focusAreas.filter(Boolean).join(", ")
+                  : "";
+                return `- ${expert.title}${focus ? ` (focus: ${focus})` : ""}`;
+              })
+              .join("\n")}`
+          : "";
+      const body = { prompt: `${prompt}${expertContext}`, mode: "requirements" };
       if (nonce) {
         body.nonce = nonce;
       }
@@ -362,6 +400,7 @@ export default function BrainstormClient() {
         source: data.source || "mock",
         nodeCount,
         edgeCount,
+        recruitedExpertCount: recruitedExperts.length,
         nonce,
       });
     } catch (error) {
@@ -454,6 +493,23 @@ export default function BrainstormClient() {
 
   useEffect(() => {
     setAuditEvents(readAuditEvents());
+    setRecruitedExperts(readRecruitedExperts());
+
+    function onStorage(event) {
+      if (
+        !event ||
+        event.key === null ||
+        event.key === RECRUITED_EXPERTS_STORAGE_KEY ||
+        event.key === AUDIT_STORAGE_KEY ||
+        event.key === FALLBACK_AUDIT_STORAGE_KEY
+      ) {
+        setAuditEvents(readAuditEvents());
+        setRecruitedExperts(readRecruitedExperts());
+      }
+    }
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   useEffect(() => {
@@ -744,6 +800,35 @@ export default function BrainstormClient() {
                   </div>
                 ))}
               </div>
+              <div className="mt-4 rounded-xl border border-red-900/25 bg-neutral-900/70 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-amber-300">Recruited Experts</div>
+                  <div className="text-[10px] text-slate-500">{recruitedExperts.length}</div>
+                </div>
+                {recruitedExperts.length === 0 ? (
+                  <div className="mt-2 text-[11px] text-slate-400">
+                    No recruited experts yet. Use War Council Recruiter.
+                  </div>
+                ) : (
+                  <div className="mt-2 max-h-36 space-y-2 overflow-auto pr-1">
+                    {recruitedExperts.map((expert) => (
+                      <div
+                        key={expert.id}
+                        className="rounded-lg border border-red-900/25 bg-neutral-950/80 p-2"
+                      >
+                        <div className="truncate text-[11px] font-semibold text-slate-200">
+                          {expert.title}
+                        </div>
+                        {Array.isArray(expert.focusAreas) && expert.focusAreas.length > 0 ? (
+                          <div className="mt-1 text-[10px] text-slate-400">
+                            {expert.focusAreas.join(" | ")}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -757,6 +842,9 @@ export default function BrainstormClient() {
               <div className="text-sm font-semibold text-red-400">AI Draft (Proposed-only)</div>
               <div className="mt-2 text-xs text-slate-400">
                 Generate a proposed draft bundle, preview it, then apply to local draft graph.
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500">
+                AI context includes recruited experts: {recruitedExperts.length}
               </div>
 
               <textarea

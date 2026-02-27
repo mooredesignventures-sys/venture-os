@@ -1,7 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Card from "../../../src/components/ui/card";
+
+const RECRUITED_EXPERTS_STORAGE_KEY = "recruited_experts";
+const AUDIT_STORAGE_KEY = "draft_audit_log";
+const FALLBACK_AUDIT_STORAGE_KEY = "audit_events";
 
 const COUNCIL_MEMBERS = [
   { id: "member-1", label: "Founder", role: "Command", left: "12%", top: "58%", delay: "0s" },
@@ -33,7 +38,241 @@ function speakerTone(speaker) {
   return "border-slate-700/60 bg-slate-900/40 text-slate-200";
 }
 
+function loadStoredArray(key) {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function resolveAuditStorageKey() {
+  if (typeof window === "undefined") {
+    return FALLBACK_AUDIT_STORAGE_KEY;
+  }
+
+  if (window.localStorage.getItem(AUDIT_STORAGE_KEY) !== null) {
+    return AUDIT_STORAGE_KEY;
+  }
+
+  if (window.localStorage.getItem(FALLBACK_AUDIT_STORAGE_KEY) !== null) {
+    return FALLBACK_AUDIT_STORAGE_KEY;
+  }
+
+  return FALLBACK_AUDIT_STORAGE_KEY;
+}
+
+function appendAuditEvent(type, payload) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const key = resolveAuditStorageKey();
+  const existing = loadStoredArray(key);
+  const createdAt = new Date().toISOString();
+  const event = {
+    id: `${Date.now()}-${type}`,
+    type,
+    createdAt,
+    payload,
+    timestamp: createdAt,
+    action: type,
+    eventType: type,
+    actor: "ai",
+  };
+  window.localStorage.setItem(key, JSON.stringify([...existing, event]));
+}
+
+function toIdPart(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function coerceTitle(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function fallbackExpertTitles(idea) {
+  const lower = String(idea || "").toLowerCase();
+  if (lower.includes("land") || lower.includes("registry") || lower.includes("property")) {
+    return [
+      "Land Registry Lawyer",
+      "Property Data Engineer",
+      "Title Risk Analyst",
+      "Conveyancing Workflow Designer",
+      "Planning Policy Specialist",
+      "Investor Due Diligence Lead",
+      "Governance Architect",
+      "Revenue Operations Strategist",
+    ];
+  }
+
+  return [
+    "Domain Strategy Lead",
+    "Governance Architect",
+    "Risk Modeling Specialist",
+    "Workflow Automation Engineer",
+    "Data Integrity Analyst",
+    "Market Operations Strategist",
+    "Regulatory Compliance Advisor",
+    "Revenue Systems Planner",
+  ];
+}
+
+function deriveFocusAreas(idea, title) {
+  const areas = [];
+  const trimmedIdea = String(idea || "").trim();
+  if (trimmedIdea) {
+    areas.push(trimmedIdea.slice(0, 60));
+  }
+
+  const titleWords = String(title || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(" ");
+  if (titleWords) {
+    areas.push(titleWords);
+  }
+
+  return areas;
+}
+
+function buildExpertsFromBundle(nodes, idea) {
+  const bundleTitles = Array.isArray(nodes)
+    ? nodes
+        .map((node) => coerceTitle(node?.title))
+        .filter(Boolean)
+        .map((title) => (title.toLowerCase().includes("expert") ? title : `${title} Expert`))
+    : [];
+
+  const candidates = [...bundleTitles, ...fallbackExpertTitles(idea)];
+  const uniqueTitles = [];
+  for (const title of candidates) {
+    if (!uniqueTitles.includes(title)) {
+      uniqueTitles.push(title);
+    }
+    if (uniqueTitles.length >= 8) {
+      break;
+    }
+  }
+
+  while (uniqueTitles.length < 6) {
+    uniqueTitles.push(`Council Expert ${uniqueTitles.length + 1}`);
+  }
+
+  const createdAt = new Date().toISOString();
+  const ideaKey = toIdPart(idea).slice(0, 18) || "general";
+  return uniqueTitles.slice(0, 8).map((title, index) => ({
+    id: `expert:${ideaKey}:${toIdPart(title) || `role-${index + 1}`}`,
+    type: "Expert",
+    title,
+    owner: "founder",
+    stage: "proposed",
+    status: "queued",
+    version: 1,
+    createdAt,
+    createdBy: "ai",
+    risk: "medium",
+    parentId: null,
+    archived: false,
+    focusAreas: deriveFocusAreas(idea, title),
+  }));
+}
+
 export default function CouncilClient() {
+  const [ideaInput, setIdeaInput] = useState("");
+  const [recruiting, setRecruiting] = useState(false);
+  const [recruitError, setRecruitError] = useState("");
+  const [recruitSource, setRecruitSource] = useState("");
+  const [recruitPreview, setRecruitPreview] = useState([]);
+  const [recruitResult, setRecruitResult] = useState("");
+  const [storedExpertCount, setStoredExpertCount] = useState(0);
+
+  function refreshStoredExpertCount() {
+    const experts = loadStoredArray(RECRUITED_EXPERTS_STORAGE_KEY).filter(
+      (item) => item?.type === "Expert" && item?.archived !== true,
+    );
+    setStoredExpertCount(experts.length);
+  }
+
+  async function handleRecruitExperts() {
+    const idea = ideaInput.trim();
+    if (!idea) {
+      setRecruitError("Enter a high-level idea before recruiting experts.");
+      return;
+    }
+
+    setRecruitError("");
+    setRecruitResult("");
+    setRecruiting(true);
+
+    try {
+      const response = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "business",
+          prompt: `${idea}\nReturn 6-8 expert roles with focus for council recruitment.`,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.bundle) {
+        throw new Error(data?.error || "Failed to recruit experts.");
+      }
+
+      const experts = buildExpertsFromBundle(data.bundle.nodes, idea);
+      setRecruitPreview(experts);
+      setRecruitSource(data.source || "mock");
+      appendAuditEvent("AI_EXPERTS_GENERATED", {
+        idea,
+        expertCount: experts.length,
+      });
+    } catch (error) {
+      setRecruitError(error instanceof Error ? error.message : "Failed to recruit experts.");
+    } finally {
+      setRecruiting(false);
+    }
+  }
+
+  function handleRecruitToBrainstorm() {
+    if (recruitPreview.length === 0) {
+      return;
+    }
+
+    const existing = loadStoredArray(RECRUITED_EXPERTS_STORAGE_KEY);
+    const existingIds = new Set(existing.map((item) => item?.id).filter(Boolean));
+    const additions = recruitPreview.filter(
+      (expert) => expert?.id && !existingIds.has(expert.id),
+    );
+    const next = [...existing, ...additions];
+    window.localStorage.setItem(RECRUITED_EXPERTS_STORAGE_KEY, JSON.stringify(next));
+
+    appendAuditEvent("AI_EXPERTS_RECRUITED", {
+      addedExperts: additions.length,
+      totalExperts: next.length,
+    });
+    refreshStoredExpertCount();
+    setRecruitResult(
+      `Recruited to Brainstorm: addedExperts=${additions.length}, totalExperts=${next.length}`,
+    );
+  }
+
+  useEffect(() => {
+    refreshStoredExpertCount();
+  }, []);
+
   return (
     <>
       <Card title="Council Hub" description="Live posture and chamber activity (UI-only mock).">
@@ -78,6 +317,64 @@ export default function CouncilClient() {
             </div>
           ))}
         </div>
+      </Card>
+
+      <Card title="AI Recruiter" description="Generate expert panel from a high-level idea (UI-only storage).">
+        <textarea
+          value={ideaInput}
+          onChange={(event) => setIdeaInput(event.target.value)}
+          placeholder="Enter high-level idea (e.g. Land registry app for investors)"
+          className="h-20 w-full rounded-xl border border-red-900/40 bg-neutral-900 p-3 text-sm text-slate-100 outline-none"
+        />
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleRecruitExperts}
+            disabled={recruiting}
+            className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-sm text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {recruiting ? "Recruiting..." : "Recruit Experts"}
+          </button>
+          <button
+            type="button"
+            onClick={handleRecruitToBrainstorm}
+            disabled={recruitPreview.length === 0}
+            className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Recruit to Brainstorm
+          </button>
+        </div>
+
+        <div className="mt-3 text-xs text-slate-400">
+          Stored recruited experts: {storedExpertCount}
+          {recruitSource ? ` | source=${recruitSource}` : ""}
+        </div>
+
+        {recruitError ? (
+          <div className="mt-3 rounded-xl border border-red-700/60 bg-red-900/30 px-3 py-2 text-xs text-red-100">
+            {recruitError}
+          </div>
+        ) : null}
+
+        {recruitResult ? (
+          <div className="mt-3 rounded-xl border border-emerald-700/60 bg-emerald-900/30 px-3 py-2 text-xs text-emerald-100">
+            {recruitResult}
+          </div>
+        ) : null}
+
+        {recruitPreview.length > 0 ? (
+          <div className="mt-3 max-h-[42vh] space-y-2 overflow-auto pr-1">
+            {recruitPreview.map((expert) => (
+              <article key={expert.id} className="rounded-xl border border-red-900/30 bg-neutral-900/70 p-3">
+                <div className="text-sm font-semibold text-slate-100">{expert.title}</div>
+                <div className="mt-1 text-[11px] text-slate-400">
+                  focus: {expert.focusAreas?.length ? expert.focusAreas.join(" | ") : "n/a"}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </Card>
 
       <Card title="Council Thread" description="Deterministic mock thread. No backend writes.">
