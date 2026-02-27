@@ -143,6 +143,7 @@ function useGravityNodes(items, arenaRef) {
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
   const [decisionFilter, setDecisionFilter] = useState("All");
+  const [selectedIdeaId, setSelectedIdeaId] = useState(null);
   const arenaRef = useRef(null);
   const nextIdeaIdRef = useRef(1000);
 
@@ -171,6 +172,10 @@ export default function BrainstormClient() {
     [],
   );
   const [ideasState, setIdeasState] = useState(initialIdeas);
+  const [parkedIdeas, setParkedIdeas] = useState([
+    { id: "park:1", title: "Idea: Token grants program" },
+    { id: "park:2", title: "Decision: Expand to TikTok" },
+  ]);
 
   const decisions = useMemo(
     () => [
@@ -198,6 +203,31 @@ export default function BrainstormClient() {
       cluster: "Core",
     };
     setIdeasState((previous) => [newIdea, ...previous]);
+  }
+
+  function handleParkIdea() {
+    if (!selectedIdeaId) {
+      return;
+    }
+
+    let parkedEntry = null;
+    setIdeasState((previous) =>
+      previous.filter((idea) => {
+        if (idea.id === selectedIdeaId) {
+          parkedEntry = {
+            id: `park:${selectedIdeaId}`,
+            title: `Idea: ${idea.label}`,
+          };
+          return false;
+        }
+        return true;
+      }),
+    );
+
+    if (parkedEntry) {
+      setParkedIdeas((previous) => [parkedEntry, ...previous]);
+      setSelectedIdeaId(null);
+    }
   }
 
   return (
@@ -261,13 +291,15 @@ export default function BrainstormClient() {
           <Card className="rounded-2xl border border-red-900/50 bg-neutral-950 shadow-xl">
             <CardContent>
               <div className="text-[11px] text-slate-400">Parking Vault</div>
-              <div className="mt-2 space-y-2 text-xs">
-                <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2">
-                  Idea: Token grants program
-                </div>
-                <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2">
-                  Decision: Expand to TikTok
-                </div>
+              <div className="mt-2 max-h-[124px] space-y-2 overflow-auto text-xs">
+                {parkedIdeas.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2"
+                  >
+                    {entry.title}
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -350,13 +382,19 @@ export default function BrainstormClient() {
                   <div
                     key={node.id}
                     className="absolute -translate-x-1/2 -translate-y-1/2"
+                    onClick={() => setSelectedIdeaId(node.id)}
                     style={{
                       left: node.x,
                       top: node.y,
                       transform: `translate(-50%, -50%) translateZ(${(index % 5) * 4}px)`,
                     }}
                   >
-                    <div className="w-[220px] rounded-xl border border-red-900/45 bg-neutral-950/90 p-2 shadow-xl">
+                    <div
+                      className={classNames(
+                        "w-[220px] rounded-xl border border-red-900/45 bg-neutral-950/90 p-2 shadow-xl",
+                        selectedIdeaId === node.id ? "ring-1 ring-amber-400/70" : "",
+                      )}
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <div className="truncate text-[11px] font-semibold text-slate-200">
                           {node.label}
@@ -389,7 +427,11 @@ export default function BrainstormClient() {
                 <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
                   Merge Themes
                 </button>
-                <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
+                <button
+                  type="button"
+                  onClick={handleParkIdea}
+                  className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400"
+                >
                   Park Idea
                 </button>
               </div>
