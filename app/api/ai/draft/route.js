@@ -17,6 +17,13 @@ function normalizePrompt(prompt) {
   return typeof prompt === "string" ? prompt.trim().replace(/\s+/g, " ") : "";
 }
 
+function normalizeNonce(nonce) {
+  if (typeof nonce !== "string") {
+    return "";
+  }
+  return nonce.trim().slice(0, 120);
+}
+
 function toIdPart(value) {
   return String(value || "")
     .toLowerCase()
@@ -24,10 +31,14 @@ function toIdPart(value) {
     .replace(/^-+|-+$/g, "");
 }
 
-function toSeed(prompt, mode) {
+function toSeed(prompt, mode, nonce = "") {
+  const normalizedNonce = normalizeNonce(nonce);
+  const seedInput = normalizedNonce
+    ? `${normalizePrompt(prompt)}|${mode}|${normalizedNonce}`
+    : `${normalizePrompt(prompt)}|${mode}`;
   return crypto
     .createHash("sha256")
-    .update(`${normalizePrompt(prompt)}|${mode}`)
+    .update(seedInput)
     .digest("hex");
 }
 
@@ -171,8 +182,8 @@ function getMockTemplates(mode, snippet) {
   ];
 }
 
-function getDeterministicMockBundle(mode, prompt) {
-  const seed = toSeed(prompt, mode);
+function getDeterministicMockBundle(mode, prompt, nonce = "") {
+  const seed = toSeed(prompt, mode, nonce);
   const key = seedKey(seed);
   const snippet = promptSnippet(prompt);
   const templates = getMockTemplates(mode, snippet);
@@ -195,18 +206,23 @@ function getDeterministicMockBundle(mode, prompt) {
   return { nodes, edges };
 }
 
-function sanitizeAIBundle(bundle, mode, prompt) {
-  const seed = toSeed(prompt, mode);
+function sanitizeAIBundle(bundle, mode, prompt, nonce = "") {
+  const seed = toSeed(prompt, mode, nonce);
   const key = seedKey(seed);
-  const fallback = getDeterministicMockBundle(mode, prompt);
+  const fallback = getDeterministicMockBundle(mode, prompt, nonce);
   const sourceNodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
   const sourceEdges = Array.isArray(bundle?.edges) ? bundle.edges : [];
+  const nonceApplied = Boolean(normalizeNonce(nonce));
+  const remappedIds = new Map();
 
   const nodeIdsSeen = new Set();
   const nodes = sourceNodes.slice(0, 10).map((node, index) => {
-    const baseId =
-      coerceString(node?.id) ||
-      `${toIdPart(node?.type || mode)}:${key}:ai:${index + 1}`;
+    const rawId = coerceString(node?.id);
+    const baseId = nonceApplied
+      ? rawId
+        ? `${rawId}:${key}`
+        : `${toIdPart(node?.type || mode)}:${key}:ai:${index + 1}`
+      : rawId || `${toIdPart(node?.type || mode)}:${key}:ai:${index + 1}`;
 
     let id = baseId;
     let dedupeIndex = 2;
@@ -215,6 +231,9 @@ function sanitizeAIBundle(bundle, mode, prompt) {
       dedupeIndex += 1;
     }
     nodeIdsSeen.add(id);
+    if (rawId) {
+      remappedIds.set(rawId, id);
+    }
 
     return createProposedNode({
       id,
@@ -247,8 +266,10 @@ function sanitizeAIBundle(bundle, mode, prompt) {
   const edges = sourceEdges
     .slice(0, 10)
     .map((edge, index) => {
-      const from = coerceString(edge?.from);
-      const to = coerceString(edge?.to);
+      const rawFrom = coerceString(edge?.from);
+      const rawTo = coerceString(edge?.to);
+      const from = nonceApplied ? remappedIds.get(rawFrom) || rawFrom : rawFrom;
+      const to = nonceApplied ? remappedIds.get(rawTo) || rawTo : rawTo;
       if (!validNodeIds.has(from) || !validNodeIds.has(to)) {
         return null;
       }
@@ -345,12 +366,13 @@ export async function POST(request) {
   }
 
   const mode = normalizeMode(body?.mode);
+  const nonce = normalizeNonce(body?.nonce);
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({
       ok: true,
       source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt),
+      bundle: getDeterministicMockBundle(mode, prompt, nonce),
     });
   }
 
@@ -359,13 +381,13 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       source: "ai",
-      bundle: sanitizeAIBundle(aiBundle, mode, prompt),
+      bundle: sanitizeAIBundle(aiBundle, mode, prompt, nonce),
     });
   } catch {
     return NextResponse.json({
       ok: true,
       source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt),
+      bundle: getDeterministicMockBundle(mode, prompt, nonce),
     });
   }
 }

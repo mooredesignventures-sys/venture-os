@@ -145,6 +145,34 @@ function useGravityNodes(items, arenaRef) {
   return nodes;
 }
 
+function formatAuditPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  const details = [];
+  if (typeof payload.nodeCount === "number") {
+    details.push(`nodes=${payload.nodeCount}`);
+  }
+  if (typeof payload.edgeCount === "number") {
+    details.push(`edges=${payload.edgeCount}`);
+  }
+  if (typeof payload.addedNodes === "number") {
+    details.push(`addedNodes=${payload.addedNodes}`);
+  }
+  if (typeof payload.addedEdges === "number") {
+    details.push(`addedEdges=${payload.addedEdges}`);
+  }
+  if (typeof payload.nonce === "string" && payload.nonce) {
+    details.push(`nonce=${payload.nonce}`);
+  }
+  if (typeof payload.prompt === "string" && payload.prompt) {
+    details.push(`prompt=${payload.prompt.slice(0, 32)}`);
+  }
+
+  return details.join(" • ");
+}
+
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -287,15 +315,37 @@ export default function BrainstormClient() {
       return;
     }
 
+    const nonce = "";
+    const eventType = "AI_DRAFT_GENERATED";
+    await requestDraft({ prompt, nonce, eventType });
+  }
+
+  async function handleRegenerateDraft() {
+    const prompt = draftPrompt.trim();
+    if (!prompt) {
+      setDraftError("Enter a brainstorm prompt before regenerating a draft.");
+      return;
+    }
+
+    const nonce = String(Date.now());
+    const eventType = "AI_DRAFT_REGENERATED";
+    await requestDraft({ prompt, nonce, eventType });
+  }
+
+  async function requestDraft({ prompt, nonce, eventType }) {
     setDraftLoading(true);
     setDraftError("");
     setApplyResult(null);
 
     try {
+      const body = { prompt, mode: "requirements" };
+      if (nonce) {
+        body.nonce = nonce;
+      }
       const response = await fetch("/api/ai/draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, mode: "requirements" }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -306,12 +356,13 @@ export default function BrainstormClient() {
       setDraftResult(data);
       const nodeCount = Array.isArray(data.bundle.nodes) ? data.bundle.nodes.length : 0;
       const edgeCount = Array.isArray(data.bundle.edges) ? data.bundle.edges.length : 0;
-      appendAuditEvent("AI_DRAFT_GENERATED", {
+      appendAuditEvent(eventType, {
         prompt,
         mode: "requirements",
         source: data.source || "mock",
         nodeCount,
         edgeCount,
+        nonce,
       });
     } catch (error) {
       setDraftError(error instanceof Error ? error.message : "Failed to generate draft bundle.");
@@ -726,6 +777,14 @@ export default function BrainstormClient() {
                 </button>
                 <button
                   type="button"
+                  onClick={handleRegenerateDraft}
+                  disabled={draftLoading || !draftPrompt.trim()}
+                  className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {draftLoading ? "Regenerating..." : "Regenerate Draft"}
+                </button>
+                <button
+                  type="button"
                   onClick={handleApplyDraft}
                   disabled={!preview}
                   className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
@@ -793,6 +852,9 @@ export default function BrainstormClient() {
                       <div key={event.id} className="rounded-lg border border-red-900/20 bg-neutral-950 px-2 py-1">
                         <div className="font-semibold text-slate-200">{event.type}</div>
                         <div className="text-[11px] text-slate-400">{event.createdAt}</div>
+                        {formatAuditPayload(event.payload) ? (
+                          <div className="text-[11px] text-slate-400">{formatAuditPayload(event.payload)}</div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
