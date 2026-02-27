@@ -7,6 +7,7 @@ import SelectFilter from "../../../src/components/ui/select-filter";
 
 const STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
+const BASELINE_SNAPSHOT_STORAGE_KEY = "baseline_snapshots";
 const COMMITTED_NODE_STORAGE_KEY = "committed_nodes";
 const COMMITTED_EDGE_STORAGE_KEY = "committed_edges";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
@@ -236,6 +237,10 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [snapshotError, setSnapshotError] = useState("");
   const [snapshotPreview, setSnapshotPreview] = useState(null);
   const [snapshotResult, setSnapshotResult] = useState("");
+  const [baselineError, setBaselineError] = useState("");
+  const [baselineLoading, setBaselineLoading] = useState(false);
+  const [baselinePreview, setBaselinePreview] = useState(null);
+  const [baselineApplyResult, setBaselineApplyResult] = useState("");
   const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
   const committedNodes = useMemo(
     () => getActiveNodes(loadStoredArray(COMMITTED_NODE_STORAGE_KEY)),
@@ -262,6 +267,16 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     const stage = typeof node.stage === "string" ? node.stage.toLowerCase() : "";
     return node.type === "Requirement" && stage === "committed" && node.archived !== true;
   });
+  const latestBaseline = useMemo(() => {
+    const snapshots = loadStoredArray(BASELINE_SNAPSHOT_STORAGE_KEY).filter((snapshot) => {
+      const stage = typeof snapshot?.stage === "string" ? snapshot.stage.toLowerCase() : "";
+      return snapshot?.type === "Baseline" && stage === "proposed" && snapshot?.archived !== true;
+    });
+    if (snapshots.length === 0) {
+      return null;
+    }
+    return snapshots[snapshots.length - 1];
+  }, [refreshToken]);
 
   const relationships = buildRelationships(filteredNodes, activeEdges);
 
@@ -613,6 +628,133 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     setRefreshToken((value) => value + 1);
   }
 
+  function buildBaselinePrompt(baseline) {
+    if (!baseline) {
+      return "";
+    }
+
+    const expertLines = Array.isArray(baseline.experts)
+      ? baseline.experts
+          .map((expert) => {
+            const focus = Array.isArray(expert?.focusAreas)
+              ? expert.focusAreas.filter(Boolean).join(", ")
+              : "";
+            return `- ${expert?.title || "Expert"}${focus ? ` (focus: ${focus})` : ""}`;
+          })
+          .join("\n")
+      : "";
+
+    return [
+      `Baseline idea: ${baseline.idea || baseline.title || "Untitled baseline"}`,
+      expertLines ? `Experts:\n${expertLines}` : "Experts: none",
+      `Brainstorm summary:\n${baseline.brainstormSummary || "No summary provided."}`,
+      "Generate only baseline-safe requirements from this concept.",
+    ].join("\n\n");
+  }
+
+  async function handleGenerateFromBaseline() {
+    if (!latestBaseline) {
+      setBaselineError("Create a baseline first in Brainstorm.");
+      return;
+    }
+
+    setBaselineError("");
+    setBaselineApplyResult("");
+    setBaselineLoading(true);
+
+    try {
+      const response = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: buildBaselinePrompt(latestBaseline),
+          mode: "requirements",
+          level: "baseline",
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.bundle) {
+        throw new Error(data?.error || "Failed to generate requirements from baseline.");
+      }
+
+      const nodes = Array.isArray(data.bundle.nodes) ? data.bundle.nodes : [];
+      const edges = Array.isArray(data.bundle.edges) ? data.bundle.edges : [];
+      setBaselinePreview({
+        baselineId: latestBaseline.id,
+        source: data.source || "mock",
+        nodes,
+        edges,
+      });
+
+      appendAuditEvent("REQUIREMENTS_GENERATED_FROM_BASELINE", {
+        baselineId: latestBaseline.id,
+        source: data.source || "mock",
+        nodeCount: nodes.length,
+        edgeCount: edges.length,
+      });
+    } catch (error) {
+      setBaselinePreview(null);
+      setBaselineError(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate requirements from baseline.",
+      );
+    } finally {
+      setBaselineLoading(false);
+    }
+  }
+
+  function handleApplyBaselineRequirements() {
+    if (!baselinePreview) {
+      return;
+    }
+
+    const draftNodes = loadStoredArray(STORAGE_KEY);
+    const draftEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const nodeIds = new Set(draftNodes.map((node) => node?.id).filter((id) => typeof id === "string"));
+    const edgeIds = new Set(draftEdges.map((edge) => edge?.id).filter((id) => typeof id === "string"));
+
+    let addedNodes = 0;
+    let addedEdges = 0;
+    const nextNodes = [...draftNodes];
+    const nextEdges = [...draftEdges];
+
+    for (const node of baselinePreview.nodes) {
+      if (!node?.id || nodeIds.has(node.id)) {
+        continue;
+      }
+      nodeIds.add(node.id);
+      nextNodes.push(node);
+      addedNodes += 1;
+    }
+
+    for (const edge of baselinePreview.edges) {
+      if (!edge?.id || edgeIds.has(edge.id)) {
+        continue;
+      }
+      edgeIds.add(edge.id);
+      nextEdges.push(edge);
+      addedEdges += 1;
+    }
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextNodes));
+    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(nextEdges));
+
+    appendAuditEvent("REQUIREMENTS_APPLIED_FROM_BASELINE", {
+      baselineId: baselinePreview.baselineId,
+      addedNodes,
+      addedEdges,
+      totalNodes: nextNodes.length,
+      totalEdges: nextEdges.length,
+    });
+
+    setBaselineApplyResult(
+      `Baseline requirements applied: addedNodes=${addedNodes}, addedEdges=${addedEdges}, totalNodes=${nextNodes.length}, totalEdges=${nextEdges.length}`,
+    );
+    setRefreshToken((value) => value + 1);
+  }
+
   function renderTree(nodes) {
     if (nodes.length === 0) {
       return (
@@ -692,6 +834,45 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
 
     return (
       <section>
+        <div>
+          <h3>Latest Baseline Concept</h3>
+          {latestBaseline ? (
+            <div>
+              <p>
+                {latestBaseline.title || "Baseline"} | createdAt={latestBaseline.createdAt || "-"}
+              </p>
+              <p>
+                experts=
+                {Array.isArray(latestBaseline.experts) ? latestBaseline.experts.length : 0}
+              </p>
+              <pre>{latestBaseline.brainstormSummary || "No baseline summary."}</pre>
+            </div>
+          ) : (
+            <p>No baseline found. Close Brainstorm to create a baseline first.</p>
+          )}
+          <button
+            type="button"
+            onClick={handleGenerateFromBaseline}
+            disabled={!latestBaseline || baselineLoading}
+          >
+            {baselineLoading
+              ? "Generating from Baseline..."
+              : "Generate Basic Requirements from Baseline"}
+          </button>
+          {baselinePreview ? (
+            <div>
+              <p>
+                source={baselinePreview.source}, nodes={baselinePreview.nodes.length}, edges=
+                {baselinePreview.edges.length}
+              </p>
+              <button type="button" onClick={handleApplyBaselineRequirements}>
+                Apply Baseline Requirements to Draft
+              </button>
+            </div>
+          ) : null}
+          {baselineError ? <p>{baselineError}</p> : null}
+          {baselineApplyResult ? <p>{baselineApplyResult}</p> : null}
+        </div>
         <p>
           Proposed requirements: {proposedRequirementNodes.length} | Committed requirements:{" "}
           {committedRequirementNodes.length}

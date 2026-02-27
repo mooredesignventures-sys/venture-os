@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 
 const ALLOWED_MODES = new Set(["requirements", "decisions", "business"]);
+const ALLOWED_LEVELS = new Set(["baseline", "detailed"]);
 const MOCK_BASE_TIME = Date.UTC(2026, 0, 1, 0, 0, 0);
 const DEFAULT_OWNER = "founder";
 const DEFAULT_RISK = "medium";
@@ -15,6 +16,11 @@ function normalizeMode(mode) {
 
 function normalizePrompt(prompt) {
   return typeof prompt === "string" ? prompt.trim().replace(/\s+/g, " ") : "";
+}
+
+function normalizeLevel(level) {
+  const value = typeof level === "string" ? level.toLowerCase().trim() : "";
+  return ALLOWED_LEVELS.has(value) ? value : "detailed";
 }
 
 function normalizeNonce(nonce) {
@@ -31,11 +37,12 @@ function toIdPart(value) {
     .replace(/^-+|-+$/g, "");
 }
 
-function toSeed(prompt, mode, nonce = "") {
+function toSeed(prompt, mode, level = "detailed", nonce = "") {
   const normalizedNonce = normalizeNonce(nonce);
+  const normalizedLevel = normalizeLevel(level);
   const seedInput = normalizedNonce
-    ? `${normalizePrompt(prompt)}|${mode}|${normalizedNonce}`
-    : `${normalizePrompt(prompt)}|${mode}`;
+    ? `${normalizePrompt(prompt)}|${mode}|${normalizedLevel}|${normalizedNonce}`
+    : `${normalizePrompt(prompt)}|${mode}|${normalizedLevel}`;
   return crypto
     .createHash("sha256")
     .update(seedInput)
@@ -182,10 +189,68 @@ function getMockTemplates(mode, snippet) {
   ];
 }
 
-function getDeterministicMockBundle(mode, prompt, nonce = "") {
-  const seed = toSeed(prompt, mode, nonce);
+function getBaselineMockBundle(seed, key, snippet) {
+  const conceptNode = createProposedNode({
+    id: `concept:${key}:1`,
+    type: "Concept",
+    title: `Baseline Concept: ${snippet}`,
+    seed,
+    index: 1,
+    version: 1,
+    owner: DEFAULT_OWNER,
+    risk: DEFAULT_RISK,
+    parentId: null,
+  });
+
+  const requirementTitles = [
+    `Core requirement set for: ${snippet}`,
+    "Baseline requirement: founder-confirmed commit boundary",
+    "Baseline requirement: archive-only lifecycle handling",
+    "Baseline requirement: append-only audit consistency",
+    "Baseline requirement: deterministic draft generation inputs",
+    "Baseline requirement: requirements traceability by baseline",
+  ];
+
+  const requirementNodes = requirementTitles.map((title, index) =>
+    createProposedNode({
+      id: `requirement:${key}:${index + 1}`,
+      type: "Requirement",
+      title,
+      seed,
+      index: index + 2,
+      version: 1,
+      owner: DEFAULT_OWNER,
+      risk: DEFAULT_RISK,
+      parentId: conceptNode.id,
+    }),
+  );
+
+  const edges = [
+    ...requirementNodes.map((node, index) =>
+      createProposedEdge({
+        id: `edge:${key}:baseline:concept:${index + 1}`,
+        from: conceptNode.id,
+        to: node.id,
+        seed,
+        index: index + 1,
+      }),
+    ),
+    ...buildChainEdges(requirementNodes, seed, `${key}:baseline`),
+  ];
+
+  return { nodes: [conceptNode, ...requirementNodes], edges };
+}
+
+function getDeterministicMockBundle(mode, prompt, level = "detailed", nonce = "") {
+  const normalizedLevel = normalizeLevel(level);
+  const seed = toSeed(prompt, mode, normalizedLevel, nonce);
   const key = seedKey(seed);
   const snippet = promptSnippet(prompt);
+
+  if (mode === "requirements" && normalizedLevel === "baseline") {
+    return getBaselineMockBundle(seed, key, snippet);
+  }
+
   const templates = getMockTemplates(mode, snippet);
 
   const nodes = templates.map((template, index) =>
@@ -206,14 +271,83 @@ function getDeterministicMockBundle(mode, prompt, nonce = "") {
   return { nodes, edges };
 }
 
-function sanitizeAIBundle(bundle, mode, prompt, nonce = "") {
-  const seed = toSeed(prompt, mode, nonce);
+function sanitizeAIBundle(bundle, mode, prompt, level = "detailed", nonce = "") {
+  const normalizedLevel = normalizeLevel(level);
+  const seed = toSeed(prompt, mode, normalizedLevel, nonce);
   const key = seedKey(seed);
-  const fallback = getDeterministicMockBundle(mode, prompt, nonce);
+  const fallback = getDeterministicMockBundle(mode, prompt, normalizedLevel, nonce);
   const sourceNodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
   const sourceEdges = Array.isArray(bundle?.edges) ? bundle.edges : [];
   const nonceApplied = Boolean(normalizeNonce(nonce));
   const remappedIds = new Map();
+
+  if (mode === "requirements" && normalizedLevel === "baseline") {
+    const aiTitles = sourceNodes
+      .map((node) => coerceString(node?.title))
+      .filter(Boolean);
+
+    const conceptTitle = aiTitles[0] || `Baseline Concept: ${promptSnippet(prompt)}`;
+    const conceptNode = createProposedNode({
+      id: `concept:${key}:1`,
+      type: "Concept",
+      title: conceptTitle,
+      seed,
+      index: 1,
+      version: 1,
+      owner: DEFAULT_OWNER,
+      risk: DEFAULT_RISK,
+      parentId: null,
+    });
+
+    const fallbackTitles = [
+      `Core requirement set for: ${promptSnippet(prompt)}`,
+      "Baseline requirement: founder-confirmed commit boundary",
+      "Baseline requirement: archive-only lifecycle handling",
+      "Baseline requirement: append-only audit consistency",
+      "Baseline requirement: deterministic draft generation inputs",
+      "Baseline requirement: requirements traceability by baseline",
+    ];
+
+    const requirementTitles = [
+      ...aiTitles.slice(1).map((title) => title.replace(/^Baseline Concept:\s*/i, "").trim()),
+      ...fallbackTitles,
+    ]
+      .filter(Boolean)
+      .slice(0, 8);
+
+    while (requirementTitles.length < 5) {
+      requirementTitles.push(`Baseline requirement ${requirementTitles.length + 1}`);
+    }
+
+    const requirementNodes = requirementTitles.map((title, index) =>
+      createProposedNode({
+        id: `requirement:${key}:baseline:${index + 1}`,
+        type: "Requirement",
+        title,
+        seed,
+        index: index + 2,
+        version: 1,
+        owner: DEFAULT_OWNER,
+        risk: DEFAULT_RISK,
+        parentId: conceptNode.id,
+      }),
+    );
+
+    const edges = [
+      ...requirementNodes.map((node, index) =>
+        createProposedEdge({
+          id: `edge:${key}:baseline:concept:${index + 1}`,
+          from: conceptNode.id,
+          to: node.id,
+          seed,
+          index: index + 1,
+        }),
+      ),
+      ...buildChainEdges(requirementNodes, seed, `${key}:baseline:chain`),
+    ];
+
+    return { nodes: [conceptNode, ...requirementNodes], edges };
+  }
 
   const nodeIdsSeen = new Set();
   const nodes = sourceNodes.slice(0, 10).map((node, index) => {
@@ -301,7 +435,7 @@ function sanitizeAIBundle(bundle, mode, prompt, nonce = "") {
   };
 }
 
-async function generateAIBundle(prompt, mode) {
+async function generateAIBundle(prompt, mode, level = "detailed") {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return null;
@@ -326,7 +460,10 @@ async function generateAIBundle(prompt, mode) {
         },
         {
           role: "user",
-          content: `Mode: ${mode}\nPrompt: ${prompt}\nGenerate 5-10 nodes and 5-10 edges.`,
+          content:
+            level === "baseline"
+              ? `Mode: ${mode}\nLevel: baseline\nPrompt: ${prompt}\nGenerate exactly one Concept node and 5-8 Requirement nodes. Return edges linking concept to requirements and a light requirement chain.`
+              : `Mode: ${mode}\nPrompt: ${prompt}\nGenerate 5-10 nodes and 5-10 edges.`,
         },
       ],
     }),
@@ -366,28 +503,29 @@ export async function POST(request) {
   }
 
   const mode = normalizeMode(body?.mode);
+  const level = normalizeLevel(body?.level);
   const nonce = normalizeNonce(body?.nonce);
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({
       ok: true,
       source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt, nonce),
+      bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
     });
   }
 
   try {
-    const aiBundle = await generateAIBundle(prompt, mode);
+    const aiBundle = await generateAIBundle(prompt, mode, level);
     return NextResponse.json({
       ok: true,
       source: "ai",
-      bundle: sanitizeAIBundle(aiBundle, mode, prompt, nonce),
+      bundle: sanitizeAIBundle(aiBundle, mode, prompt, level, nonce),
     });
   } catch {
     return NextResponse.json({
       ok: true,
       source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt, nonce),
+      bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
     });
   }
 }
