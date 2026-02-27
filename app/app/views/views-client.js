@@ -227,6 +227,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [search, setSearch] = useState("");
   const [relationshipTypeFilter, setRelationshipTypeFilter] = useState("all");
   const [refreshToken, setRefreshToken] = useState(0);
+  const [requirementsScope, setRequirementsScope] = useState("proposed");
   const [founderCommitText, setFounderCommitText] = useState("");
   const [commitError, setCommitError] = useState("");
   const [commitResult, setCommitResult] = useState(null);
@@ -236,6 +237,10 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [snapshotPreview, setSnapshotPreview] = useState(null);
   const [snapshotResult, setSnapshotResult] = useState("");
   const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
+  const committedNodes = useMemo(
+    () => getActiveNodes(loadStoredArray(COMMITTED_NODE_STORAGE_KEY)),
+    [refreshToken],
+  );
   const activeEdges = useMemo(() => loadDraftEdges(), [refreshToken]);
   const filteredNodes =
     viewScope === "committed"
@@ -252,6 +257,10 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const proposedRequirementNodes = requirementNodes.filter((node) => {
     const stage = typeof node.stage === "string" ? node.stage.toLowerCase() : "";
     return stage === "proposed" && node.archived !== true;
+  });
+  const committedRequirementNodes = committedNodes.filter((node) => {
+    const stage = typeof node.stage === "string" ? node.stage.toLowerCase() : "";
+    return node.type === "Requirement" && stage === "committed" && node.archived !== true;
   });
 
   const relationships = buildRelationships(filteredNodes, activeEdges);
@@ -676,15 +685,43 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   }
 
   if (mode === "requirements") {
+    const showingProposed = requirementsScope === "proposed";
+    const visibleRequirementNodes = showingProposed
+      ? proposedRequirementNodes
+      : committedRequirementNodes;
+
     return (
       <section>
-        <p>Proposed requirements: {proposedRequirementNodes.length}</p>
-        {proposedRequirementNodes.length === 0 ? (
+        <p>
+          Proposed requirements: {proposedRequirementNodes.length} | Committed requirements:{" "}
+          {committedRequirementNodes.length}
+        </p>
+        <div>
+          <button
+            type="button"
+            onClick={() => setRequirementsScope("proposed")}
+            disabled={showingProposed}
+          >
+            Proposed
+          </button>{" "}
+          <button
+            type="button"
+            onClick={() => setRequirementsScope("committed")}
+            disabled={!showingProposed}
+          >
+            Committed
+          </button>
+        </div>
+        {visibleRequirementNodes.length === 0 ? (
           <EmptyState
-            title="No proposed requirements found."
-            message="Generate and apply a brainstorm draft to populate this list."
+            title={`No ${showingProposed ? "proposed" : "committed"} requirements found.`}
+            message={
+              showingProposed
+                ? "Generate and apply a brainstorm draft to populate this list."
+                : "Commit proposed requirements to populate the committed list."
+            }
           />
-        ) : (
+        ) : showingProposed ? (
           <table>
             <thead>
               <tr>
@@ -697,7 +734,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
               </tr>
             </thead>
             <tbody>
-              {proposedRequirementNodes.map((node) => {
+              {visibleRequirementNodes.map((node) => {
                 const editable = isEditableProposedRequirement(node);
                 return (
                   <tr key={node.id}>
@@ -749,6 +786,29 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Risk</th>
+                <th>Status</th>
+                <th>Version</th>
+                <th>Owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRequirementNodes.map((node) => (
+                <tr key={node.id}>
+                  <td>{node.title}</td>
+                  <td>{node.risk || "medium"}</td>
+                  <td>{node.status || "queued"}</td>
+                  <td>{node.version ?? "-"}</td>
+                  <td>{node.owner || "-"}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
