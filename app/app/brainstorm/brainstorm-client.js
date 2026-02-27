@@ -10,6 +10,8 @@ import Card, { CardContent } from "../../../src/components/ui/card";
 
 const DRAFT_NODE_STORAGE_KEY = "draft_nodes";
 const DRAFT_EDGE_STORAGE_KEY = "draft_edges";
+const AUDIT_STORAGE_KEY = "draft_audit_log";
+const FALLBACK_AUDIT_STORAGE_KEY = "audit_events";
 
 function classNames(...values) {
   return values.filter(Boolean).join(" ");
@@ -150,6 +152,7 @@ export default function BrainstormClient() {
   const [draftError, setDraftError] = useState("");
   const [draftResult, setDraftResult] = useState(null);
   const [applyResult, setApplyResult] = useState(null);
+  const [auditEvents, setAuditEvents] = useState([]);
   const [decisionFilter, setDecisionFilter] = useState("All");
   const [fullscreen, setFullscreen] = useState(null);
   const arenaRef = useRef(null);
@@ -218,6 +221,48 @@ export default function BrainstormClient() {
     };
   }, [draftResult]);
 
+  function resolveAuditStorageKey() {
+    const hasPrimary = window.localStorage.getItem(AUDIT_STORAGE_KEY) !== null;
+    if (hasPrimary) {
+      return AUDIT_STORAGE_KEY;
+    }
+
+    const hasFallback = window.localStorage.getItem(FALLBACK_AUDIT_STORAGE_KEY) !== null;
+    if (hasFallback) {
+      return FALLBACK_AUDIT_STORAGE_KEY;
+    }
+
+    return FALLBACK_AUDIT_STORAGE_KEY;
+  }
+
+  function readAuditEvents() {
+    try {
+      const key = resolveAuditStorageKey();
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function appendAuditEvent(type, payload) {
+    const event = {
+      id: `${Date.now()}-${type}`,
+      type,
+      createdAt: new Date().toISOString(),
+      payload,
+    };
+    const key = resolveAuditStorageKey();
+    const existing = readAuditEvents();
+    const next = [...existing, event];
+    window.localStorage.setItem(key, JSON.stringify(next));
+    setAuditEvents(next);
+  }
+
   function handleNewIdea() {
     const newIdea = {
       id: `idea:new:${nextIdeaIdRef.current++}`,
@@ -259,6 +304,15 @@ export default function BrainstormClient() {
       }
 
       setDraftResult(data);
+      const nodeCount = Array.isArray(data.bundle.nodes) ? data.bundle.nodes.length : 0;
+      const edgeCount = Array.isArray(data.bundle.edges) ? data.bundle.edges.length : 0;
+      appendAuditEvent("AI_DRAFT_GENERATED", {
+        prompt,
+        mode: "requirements",
+        source: data.source || "mock",
+        nodeCount,
+        edgeCount,
+      });
     } catch (error) {
       setDraftError(error instanceof Error ? error.message : "Failed to generate draft bundle.");
     } finally {
@@ -324,6 +378,13 @@ export default function BrainstormClient() {
       totalNodes: nextNodes.length,
       totalEdges: nextEdges.length,
     });
+
+    appendAuditEvent("AI_DRAFT_APPLIED", {
+      addedNodes,
+      addedEdges,
+      totalNodes: nextNodes.length,
+      totalEdges: nextEdges.length,
+    });
   }
 
   useEffect(() => {
@@ -339,6 +400,10 @@ export default function BrainstormClient() {
 
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [fullscreen]);
+
+  useEffect(() => {
+    setAuditEvents(readAuditEvents());
+  }, []);
 
   useEffect(() => {
     if (!fullscreen) {
@@ -717,6 +782,22 @@ export default function BrainstormClient() {
                   </div>
                 </div>
               ) : null}
+
+              <div className="mt-4 rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2">
+                <div className="font-semibold text-slate-200">Audit Events (newest first)</div>
+                {auditEvents.length === 0 ? (
+                  <div className="mt-2 text-xs text-slate-400">No audit events yet.</div>
+                ) : (
+                  <div className="mt-2 max-h-32 space-y-1 overflow-auto pr-1 text-xs text-slate-300">
+                    {[...auditEvents].reverse().map((event) => (
+                      <div key={event.id} className="rounded-lg border border-red-900/20 bg-neutral-950 px-2 py-1">
+                        <div className="font-semibold text-slate-200">{event.type}</div>
+                        <div className="text-[11px] text-slate-400">{event.createdAt}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
