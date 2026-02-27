@@ -144,6 +144,7 @@ export default function BrainstormClient() {
   const [message, setMessage] = useState("");
   const [decisionFilter, setDecisionFilter] = useState("All");
   const arenaRef = useRef(null);
+  const nextIdeaIdRef = useRef(1000);
 
   const team = useMemo(
     () => [
@@ -156,7 +157,7 @@ export default function BrainstormClient() {
     [],
   );
 
-  const ideas = useMemo(
+  const initialIdeas = useMemo(
     () => [
       { id: "idea:1", label: "LandReg: Temporal unregistered detection", cluster: "Core" },
       { id: "idea:2", label: "CUPI persistence scoring", cluster: "Scoring" },
@@ -169,6 +170,7 @@ export default function BrainstormClient() {
     ],
     [],
   );
+  const [ideasState, setIdeasState] = useState(initialIdeas);
 
   const decisions = useMemo(
     () => [
@@ -187,7 +189,16 @@ export default function BrainstormClient() {
     return decisions.filter((entry) => entry.state === decisionFilter);
   }, [decisionFilter, decisions]);
 
-  const nodes = useGravityNodes(ideas, arenaRef);
+  const nodes = useGravityNodes(ideasState, arenaRef);
+
+  function handleNewIdea() {
+    const newIdea = {
+      id: `idea:new:${nextIdeaIdRef.current++}`,
+      label: `New idea: ${new Date().toLocaleTimeString()}`,
+      cluster: "Core",
+    };
+    setIdeasState((previous) => [newIdea, ...previous]);
+  }
 
   return (
     <div className="space-y-6">
@@ -365,7 +376,11 @@ export default function BrainstormClient() {
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                <button className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-white shadow-lg">
+                <button
+                  type="button"
+                  onClick={handleNewIdea}
+                  className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-white shadow-lg"
+                >
                   New Idea
                 </button>
                 <button className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 hover:border-amber-400">
