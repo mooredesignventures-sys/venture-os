@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import EmptyState from "../../../src/components/ui/empty-state";
 import SearchBox from "../../../src/components/ui/search-box";
 import SelectFilter from "../../../src/components/ui/select-filter";
+import { getMockGraph } from "../../../src/lib/mock-graph-data";
 
 const STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
@@ -163,24 +164,44 @@ function buildRelationships(nodes, edges) {
 export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [search, setSearch] = useState("");
   const [relationshipTypeFilter, setRelationshipTypeFilter] = useState("all");
+
   const activeNodes = getActiveNodes(loadDraftNodes());
   const activeEdges = loadDraftEdges();
-  const filteredNodes =
+  const scopedNodes =
     viewScope === "committed"
       ? activeNodes.filter((node) => normalizeStatus(node) === "committed")
       : activeNodes;
 
+  const scopedEdges =
+    viewScope === "committed"
+      ? activeEdges.filter((edge) => edge?.stage === "committed")
+      : activeEdges;
+
+  const scopedDecisionNodes = scopedNodes.filter((node) => node.type === "Decision");
+  const scopedRequirementNodes = scopedNodes.filter((node) => node.type === "Requirement");
+  const scopedRelationships = buildRelationships(scopedNodes, scopedEdges);
+
+  const shouldUseMock =
+    mode === "decisions"
+      ? scopedDecisionNodes.length === 0
+      : mode === "requirements"
+        ? scopedRequirementNodes.length === 0
+        : scopedRelationships.length === 0;
+
+  const mockGraph = useMemo(() => getMockGraph(mode, viewScope), [mode, viewScope]);
+
+  const graphNodes = shouldUseMock ? mockGraph.nodes : scopedNodes;
+  const graphEdges = shouldUseMock ? mockGraph.edges : scopedEdges;
+
   const nodeById = useMemo(
-    () => new Map(filteredNodes.map((node) => [node.id, node])),
-    [filteredNodes]
+    () => new Map(graphNodes.map((node) => [node.id, node])),
+    [graphNodes]
   );
 
-  const decisionNodes = filteredNodes.filter((node) => node.type === "Decision");
-  const requirementNodes = filteredNodes.filter(
-    (node) => node.type === "Requirement"
-  );
+  const decisionNodes = graphNodes.filter((node) => node.type === "Decision");
+  const requirementNodes = graphNodes.filter((node) => node.type === "Requirement");
 
-  const relationships = buildRelationships(filteredNodes, activeEdges);
+  const relationships = buildRelationships(graphNodes, graphEdges);
 
   const relationshipsBySource = useMemo(() => {
     const grouped = new Map();
@@ -301,7 +322,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   return (
     <section>
       <p>
-        Nodes: {filteredNodes.length} | Relationships: {relationships.length}
+        Nodes: {graphNodes.length} | Relationships: {relationships.length}
       </p>
       <SearchBox
         id="business-search"
