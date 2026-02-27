@@ -46,6 +46,13 @@ function clusterPill(cluster) {
   return map[cluster] || "bg-slate-800/40 border-slate-600/40 text-slate-200";
 }
 
+function decisionStateBadge(state) {
+  if (state === "Accepted") {
+    return "border-emerald-700/50 bg-emerald-900/35 text-emerald-200";
+  }
+  return "border-red-700/50 bg-red-900/35 text-red-200";
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -135,6 +142,7 @@ function useGravityNodes(items, arenaRef) {
 
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
+  const [decisionFilter, setDecisionFilter] = useState("All");
   const arenaRef = useRef(null);
 
   const team = useMemo(
@@ -161,6 +169,23 @@ export default function BrainstormClient() {
     ],
     [],
   );
+
+  const decisions = useMemo(
+    () => [
+      { id: "d1", title: "Determinism Level = Strict", state: "Locked" },
+      { id: "d2", title: "Exposure Level = C", state: "Locked" },
+      { id: "d3", title: "Overnight Refactor Disabled", state: "Locked" },
+      { id: "d4", title: "Freeze Threshold ~= 90%", state: "Accepted" },
+    ],
+    [],
+  );
+
+  const visibleDecisions = useMemo(() => {
+    if (decisionFilter === "All") {
+      return decisions;
+    }
+    return decisions.filter((entry) => entry.state === decisionFilter);
+  }, [decisionFilter, decisions]);
 
   const nodes = useGravityNodes(ideas, arenaRef);
 
@@ -392,19 +417,42 @@ export default function BrainstormClient() {
           <Card className="rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl">
             <CardContent>
               <div className="text-sm font-semibold text-red-400">Decision Log</div>
-              <div className="mt-3 max-h-[720px] space-y-3 overflow-auto pr-1">
-                {[
-                  { id: "d1", title: "Determinism Level = Strict", state: "Locked" },
-                  { id: "d2", title: "Exposure Level = C", state: "Locked" },
-                  { id: "d3", title: "Overnight Refactor Disabled", state: "Locked" },
-                  { id: "d4", title: "Freeze Threshold ~= 90%", state: "Accepted" },
-                ].map((entry) => (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {["All", "Locked", "Accepted"].map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setDecisionFilter(option)}
+                    className={classNames(
+                      "rounded-lg border px-2 py-1 text-[10px]",
+                      decisionFilter === option
+                        ? "border-amber-500/70 bg-amber-900/20 text-amber-200"
+                        : "border-red-900/40 bg-neutral-900 text-slate-300 hover:border-amber-500/60",
+                    )}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 max-h-[520px] space-y-2 overflow-auto pr-1">
+                {visibleDecisions.map((entry) => (
                   <div
                     key={entry.id}
-                    className="rounded-xl border border-red-900/25 bg-neutral-900 p-3"
+                    className="rounded-xl border border-red-900/25 bg-neutral-900 p-2"
                   >
-                    <div className="text-xs font-semibold text-slate-200">{entry.title}</div>
-                    <div className="mt-1 text-[10px] text-slate-400">State: {entry.state}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="truncate text-xs font-semibold text-slate-200">
+                        {entry.title}
+                      </div>
+                      <span
+                        className={classNames(
+                          "shrink-0 rounded-md border px-1.5 py-0.5 text-[9px]",
+                          decisionStateBadge(entry.state),
+                        )}
+                      >
+                        {entry.state}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
