@@ -11,6 +11,7 @@
 - Map height 300px; buttons below map
 - Team list scrolls (max-h 240px)
 - Chat compact (h-20)
+- Fullscreen: Map fullscreen includes embedded chat; overlay does not scroll
 
 ## Provenance
 
