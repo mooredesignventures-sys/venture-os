@@ -8,6 +8,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Card, { CardContent } from "../../../src/components/ui/card";
 
+const DRAFT_NODE_STORAGE_KEY = "draft_nodes";
+const DRAFT_EDGE_STORAGE_KEY = "draft_edges";
+
 function classNames(...values) {
   return values.filter(Boolean).join(" ");
 }
@@ -142,6 +145,11 @@ function useGravityNodes(items, arenaRef) {
 
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
+  const [draftPrompt, setDraftPrompt] = useState("");
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState("");
+  const [draftResult, setDraftResult] = useState(null);
+  const [applyResult, setApplyResult] = useState(null);
   const [decisionFilter, setDecisionFilter] = useState("All");
   const [fullscreen, setFullscreen] = useState(null);
   const arenaRef = useRef(null);
@@ -193,6 +201,22 @@ export default function BrainstormClient() {
 
   const activeArenaRef = fullscreen === "map" ? fullscreenArenaRef : arenaRef;
   const nodes = useGravityNodes(ideasState, activeArenaRef);
+  const preview = useMemo(() => {
+    if (!draftResult?.bundle) {
+      return null;
+    }
+
+    const nodes = Array.isArray(draftResult.bundle.nodes) ? draftResult.bundle.nodes : [];
+    const edges = Array.isArray(draftResult.bundle.edges) ? draftResult.bundle.edges : [];
+    const titleById = new Map(nodes.map((node) => [node.id, node.title]));
+
+    return {
+      source: draftResult.source || "mock",
+      nodes,
+      edges,
+      titleById,
+    };
+  }, [draftResult]);
 
   function handleNewIdea() {
     const newIdea = {
@@ -209,6 +233,97 @@ export default function BrainstormClient() {
 
   function closeFullscreen() {
     setFullscreen(null);
+  }
+
+  async function handleGenerateDraft() {
+    const prompt = draftPrompt.trim();
+    if (!prompt) {
+      setDraftError("Enter a brainstorm prompt before generating a draft.");
+      return;
+    }
+
+    setDraftLoading(true);
+    setDraftError("");
+    setApplyResult(null);
+
+    try {
+      const response = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, mode: "requirements" }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.bundle) {
+        throw new Error(data?.error || "Failed to generate draft bundle.");
+      }
+
+      setDraftResult(data);
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Failed to generate draft bundle.");
+    } finally {
+      setDraftLoading(false);
+    }
+  }
+
+  function readStoredArray(key) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function handleApplyDraft() {
+    if (!preview) {
+      setDraftError("Generate a draft first.");
+      return;
+    }
+
+    setDraftError("");
+
+    const storedNodes = readStoredArray(DRAFT_NODE_STORAGE_KEY);
+    const storedEdges = readStoredArray(DRAFT_EDGE_STORAGE_KEY);
+    const nodeIds = new Set(storedNodes.map((node) => node?.id).filter(Boolean));
+    const edgeIds = new Set(storedEdges.map((edge) => edge?.id).filter(Boolean));
+
+    let addedNodes = 0;
+    let addedEdges = 0;
+    const nextNodes = [...storedNodes];
+    const nextEdges = [...storedEdges];
+
+    for (const node of preview.nodes) {
+      if (!node?.id || nodeIds.has(node.id)) {
+        continue;
+      }
+      nodeIds.add(node.id);
+      nextNodes.push(node);
+      addedNodes += 1;
+    }
+
+    for (const edge of preview.edges) {
+      if (!edge?.id || edgeIds.has(edge.id)) {
+        continue;
+      }
+      edgeIds.add(edge.id);
+      nextEdges.push(edge);
+      addedEdges += 1;
+    }
+
+    window.localStorage.setItem(DRAFT_NODE_STORAGE_KEY, JSON.stringify(nextNodes));
+    window.localStorage.setItem(DRAFT_EDGE_STORAGE_KEY, JSON.stringify(nextEdges));
+
+    setApplyResult({
+      addedNodes,
+      addedEdges,
+      totalNodes: nextNodes.length,
+      totalEdges: nextEdges.length,
+    });
   }
 
   useEffect(() => {
@@ -520,6 +635,90 @@ export default function BrainstormClient() {
         <div className="space-y-6 md:col-span-6">
           {renderMapPanel("normal")}
           {renderChatPanel("normal")}
+
+          <Card className="rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl">
+            <CardContent>
+              <div className="text-sm font-semibold text-red-400">AI Draft (Proposed-only)</div>
+              <div className="mt-2 text-xs text-slate-400">
+                Generate a proposed draft bundle, preview it, then apply to local draft graph.
+              </div>
+
+              <textarea
+                value={draftPrompt}
+                onChange={(event) => setDraftPrompt(event.target.value)}
+                placeholder="Describe the brainstorm direction for requirements draft generation..."
+                className="mt-3 h-24 w-full resize-none rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2 text-sm text-slate-100 outline-none"
+              />
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleGenerateDraft}
+                  disabled={draftLoading}
+                  className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-sm text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {draftLoading ? "Generating..." : "Generate Draft"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyDraft}
+                  disabled={!preview}
+                  className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Apply to Draft Graph
+                </button>
+              </div>
+
+              {draftError ? (
+                <div className="mt-3 rounded-xl border border-red-700/60 bg-red-900/25 px-3 py-2 text-xs text-red-100">
+                  {draftError}
+                </div>
+              ) : null}
+
+              {applyResult ? (
+                <div className="mt-3 rounded-xl border border-emerald-700/60 bg-emerald-900/20 px-3 py-2 text-xs text-emerald-100">
+                  Applied draft bundle: addedNodes={applyResult.addedNodes}, addedEdges=
+                  {applyResult.addedEdges}, totalNodes={applyResult.totalNodes}, totalEdges=
+                  {applyResult.totalEdges}
+                </div>
+              ) : null}
+
+              {preview ? (
+                <div className="mt-4 space-y-3 text-xs">
+                  <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2 text-slate-200">
+                    source={preview.source} • nodes={preview.nodes.length} • edges=
+                    {preview.edges.length}
+                  </div>
+
+                  <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2">
+                    <div className="font-semibold text-slate-200">Nodes (read-only)</div>
+                    <div className="mt-2 max-h-32 space-y-1 overflow-auto pr-1 text-slate-300">
+                      {preview.nodes.map((node) => (
+                        <div key={node.id} className="truncate">
+                          [{node.type}] {node.title}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2">
+                    <div className="font-semibold text-slate-200">Edges (read-only)</div>
+                    <div className="mt-2 max-h-28 space-y-1 overflow-auto pr-1 text-slate-300">
+                      {preview.edges.map((edge) => {
+                        const fromLabel = preview.titleById.get(edge.from) || edge.from;
+                        const toLabel = preview.titleById.get(edge.to) || edge.to;
+                        return (
+                          <div key={edge.id} className="truncate">
+                            {edge.relationshipType}: {fromLabel} -&gt; {toLabel}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
         </div>
 
         <div className="md:col-span-3">
