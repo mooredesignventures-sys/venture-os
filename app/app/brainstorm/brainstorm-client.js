@@ -1,5 +1,10 @@
 "use client";
 
+// 🔒 LOCKED BASELINE (Brainstorm War Room UI)
+// Known-good tag: brainstorm-maturity-v1 (commit d9d528a)
+// If changes are needed: duplicate to brainstorm-client.v2.js and update imports.
+// Avoid in-place edits unless fixing a bug/regression.
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import Card, { CardContent } from "../../../src/components/ui/card";
 
