@@ -232,6 +232,9 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [commitResult, setCommitResult] = useState(null);
   const [rowEdits, setRowEdits] = useState({});
   const [savedNodeId, setSavedNodeId] = useState("");
+  const [snapshotError, setSnapshotError] = useState("");
+  const [snapshotPreview, setSnapshotPreview] = useState(null);
+  const [snapshotResult, setSnapshotResult] = useState("");
   const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
   const activeEdges = useMemo(() => loadDraftEdges(), [refreshToken]);
   const filteredNodes =
@@ -489,6 +492,118 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     setRefreshToken((value) => value + 1);
   }
 
+  function buildSnapshotFileName() {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    const stamp = [
+      now.getFullYear(),
+      pad(now.getMonth() + 1),
+      pad(now.getDate()),
+      "-",
+      pad(now.getHours()),
+      pad(now.getMinutes()),
+      pad(now.getSeconds()),
+    ].join("");
+    return `venture-os-draft-snapshot-${stamp}.json`;
+  }
+
+  function handleExportSnapshot() {
+    const nodes = loadStoredArray(STORAGE_KEY);
+    const edges = loadStoredArray(EDGE_STORAGE_KEY);
+    const snapshot = {
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+      nodes,
+      edges,
+    };
+
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = buildSnapshotFileName();
+    link.click();
+    URL.revokeObjectURL(url);
+
+    appendAuditEvent("DRAFT_SNAPSHOT_EXPORTED", {
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+    });
+    setSnapshotResult("Draft snapshot exported.");
+    setSnapshotError("");
+  }
+
+  async function handleSnapshotFileChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setSnapshotError("");
+    setSnapshotResult("");
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const fileNodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
+      const fileEdges = Array.isArray(parsed?.edges) ? parsed.edges : [];
+
+      const existingNodes = loadStoredArray(STORAGE_KEY);
+      const existingEdges = loadStoredArray(EDGE_STORAGE_KEY);
+      const existingNodeIds = new Set(
+        existingNodes.map((node) => node?.id).filter((id) => typeof id === "string"),
+      );
+      const existingEdgeIds = new Set(
+        existingEdges.map((edge) => edge?.id).filter((id) => typeof id === "string"),
+      );
+
+      const addableNodes = fileNodes.filter(
+        (node) => typeof node?.id === "string" && !existingNodeIds.has(node.id),
+      );
+      const addableEdges = fileEdges.filter(
+        (edge) => typeof edge?.id === "string" && !existingEdgeIds.has(edge.id),
+      );
+
+      setSnapshotPreview({
+        fileName: file.name,
+        fileNodeCount: fileNodes.length,
+        fileEdgeCount: fileEdges.length,
+        addableNodes,
+        addableEdges,
+      });
+    } catch {
+      setSnapshotPreview(null);
+      setSnapshotError("Invalid snapshot JSON.");
+    }
+  }
+
+  function handleApplySnapshotImport() {
+    if (!snapshotPreview) {
+      return;
+    }
+
+    const existingNodes = loadStoredArray(STORAGE_KEY);
+    const existingEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const mergedNodes = [...existingNodes, ...snapshotPreview.addableNodes];
+    const mergedEdges = [...existingEdges, ...snapshotPreview.addableEdges];
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedNodes));
+    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(mergedEdges));
+
+    appendAuditEvent("DRAFT_SNAPSHOT_IMPORTED", {
+      addedNodes: snapshotPreview.addableNodes.length,
+      addedEdges: snapshotPreview.addableEdges.length,
+      totalNodes: mergedNodes.length,
+      totalEdges: mergedEdges.length,
+    });
+
+    setSnapshotResult(
+      `Snapshot imported: addedNodes=${snapshotPreview.addableNodes.length}, addedEdges=${snapshotPreview.addableEdges.length}, totalNodes=${mergedNodes.length}, totalEdges=${mergedEdges.length}`,
+    );
+    setSnapshotError("");
+    setRefreshToken((value) => value + 1);
+  }
+
   function renderTree(nodes) {
     if (nodes.length === 0) {
       return (
@@ -637,6 +752,41 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
             </tbody>
           </table>
         )}
+        <div>
+          <h3>Draft Snapshot</h3>
+          <button type="button" onClick={handleExportSnapshot}>
+            Export Draft Snapshot
+          </button>
+          <p>
+            <label htmlFor="draft-snapshot-import">Import Snapshot</label>
+            <br />
+            <input
+              id="draft-snapshot-import"
+              type="file"
+              accept=".json,application/json"
+              onChange={handleSnapshotFileChange}
+            />
+          </p>
+          {snapshotPreview ? (
+            <div>
+              <p>
+                Preview ({snapshotPreview.fileName}): nodes={snapshotPreview.fileNodeCount},
+                edges={snapshotPreview.fileEdgeCount}, addableNodes={snapshotPreview.addableNodes.length},
+                addableEdges={snapshotPreview.addableEdges.length}
+              </p>
+              <button type="button" onClick={handleApplySnapshotImport}>
+                Apply Import
+              </button>
+            </div>
+          ) : null}
+          {snapshotError ? <p>{snapshotError}</p> : null}
+          {snapshotResult ? <p>{snapshotResult}</p> : null}
+        </div>
+        <div>
+          <h3>Stability</h3>
+          <p>Placeholder — freeze enforcement not enabled yet.</p>
+          <p>Stability: 100 (placeholder)</p>
+        </div>
         <div>
           <h3>Founder Commit</h3>
           <p>Only Founder commits. This moves proposed -&gt; committed.</p>
