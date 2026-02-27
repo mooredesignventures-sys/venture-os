@@ -7,6 +7,11 @@ import SelectFilter from "../../../src/components/ui/select-filter";
 
 const STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
+const COMMITTED_NODE_STORAGE_KEY = "committed_nodes";
+const COMMITTED_EDGE_STORAGE_KEY = "committed_edges";
+const AUDIT_STORAGE_KEY = "draft_audit_log";
+const FALLBACK_AUDIT_STORAGE_KEY = "audit_events";
+const COMMIT_CONFIRM_TEXT = "CONFIRMED";
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 
 function normalizeRelationships(node) {
@@ -89,6 +94,62 @@ function loadDraftNodes() {
   }
 }
 
+function loadStoredArray(key) {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function resolveAuditStorageKey() {
+  if (typeof window === "undefined") {
+    return FALLBACK_AUDIT_STORAGE_KEY;
+  }
+
+  if (window.localStorage.getItem(AUDIT_STORAGE_KEY) !== null) {
+    return AUDIT_STORAGE_KEY;
+  }
+
+  if (window.localStorage.getItem(FALLBACK_AUDIT_STORAGE_KEY) !== null) {
+    return FALLBACK_AUDIT_STORAGE_KEY;
+  }
+
+  return FALLBACK_AUDIT_STORAGE_KEY;
+}
+
+function appendAuditEvent(type, payload) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const createdAt = new Date().toISOString();
+  const event = {
+    id: `${Date.now()}-${type}`,
+    type,
+    createdAt,
+    payload,
+    timestamp: createdAt,
+    action: type,
+    eventType: type,
+    actor: "founder",
+  };
+
+  const key = resolveAuditStorageKey();
+  const existing = loadStoredArray(key);
+  window.localStorage.setItem(key, JSON.stringify([...existing, event]));
+}
+
 function getActiveNodes(nodes) {
   return nodes
     .filter(
@@ -163,8 +224,12 @@ function buildRelationships(nodes, edges) {
 export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [search, setSearch] = useState("");
   const [relationshipTypeFilter, setRelationshipTypeFilter] = useState("all");
-  const activeNodes = getActiveNodes(loadDraftNodes());
-  const activeEdges = loadDraftEdges();
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [founderCommitText, setFounderCommitText] = useState("");
+  const [commitError, setCommitError] = useState("");
+  const [commitResult, setCommitResult] = useState(null);
+  const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
+  const activeEdges = useMemo(() => loadDraftEdges(), [refreshToken]);
   const filteredNodes =
     viewScope === "committed"
       ? activeNodes.filter((node) => normalizeStatus(node) === "committed")
@@ -224,6 +289,109 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
 
     return grouped;
   }, [filteredRelationships]);
+
+  function handleFounderCommit() {
+    if (founderCommitText !== COMMIT_CONFIRM_TEXT) {
+      setCommitError("Type CONFIRMED exactly to commit proposed requirements.");
+      return;
+    }
+
+    const draftNodes = loadStoredArray(STORAGE_KEY);
+    const draftEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const committedNodes = loadStoredArray(COMMITTED_NODE_STORAGE_KEY);
+    const committedEdges = loadStoredArray(COMMITTED_EDGE_STORAGE_KEY);
+
+    const proposedRequirements = draftNodes.filter((node) => {
+      const stage = typeof node?.stage === "string" ? node.stage.toLowerCase() : "";
+      return node?.type === "Requirement" && stage === "proposed" && node?.archived !== true;
+    });
+
+    if (proposedRequirements.length === 0) {
+      setCommitError("No proposed requirements found to commit.");
+      return;
+    }
+
+    const proposedIds = new Set(proposedRequirements.map((node) => node.id));
+    let archivedProposedCount = 0;
+    const nextDraftNodes = draftNodes.map((node) => {
+      if (!proposedIds.has(node?.id)) {
+        return node;
+      }
+      archivedProposedCount += 1;
+      return {
+        ...node,
+        stage: "archived",
+        archived: true,
+      };
+    });
+
+    const committedNodeIds = new Set(
+      committedNodes.map((node) => node?.id).filter((id) => typeof id === "string"),
+    );
+    const committedNodeAdds = proposedRequirements
+      .filter((node) => !committedNodeIds.has(node.id))
+      .map((node) => ({
+        ...node,
+        stage: "committed",
+        archived: false,
+      }));
+    const nextCommittedNodes = [...committedNodes, ...committedNodeAdds];
+
+    const relatedEdges = draftEdges.filter(
+      (edge) =>
+        edge &&
+        typeof edge.from === "string" &&
+        typeof edge.to === "string" &&
+        (proposedIds.has(edge.from) || proposedIds.has(edge.to)),
+    );
+
+    const relatedEdgeIds = new Set(
+      relatedEdges.map((edge) => edge?.id).filter((id) => typeof id === "string"),
+    );
+    let archivedEdgeCount = 0;
+    const nextDraftEdges = draftEdges.map((edge) => {
+      if (!relatedEdgeIds.has(edge?.id)) {
+        return edge;
+      }
+      archivedEdgeCount += 1;
+      return {
+        ...edge,
+        stage: "archived",
+        archived: true,
+      };
+    });
+
+    const committedEdgeIds = new Set(
+      committedEdges.map((edge) => edge?.id).filter((id) => typeof id === "string"),
+    );
+    const committedEdgeAdds = relatedEdges
+      .filter((edge) => typeof edge?.id === "string" && !committedEdgeIds.has(edge.id))
+      .map((edge) => ({
+        ...edge,
+        stage: "committed",
+        archived: false,
+      }));
+    const nextCommittedEdges = [...committedEdges, ...committedEdgeAdds];
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextDraftNodes));
+    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(nextDraftEdges));
+    window.localStorage.setItem(COMMITTED_NODE_STORAGE_KEY, JSON.stringify(nextCommittedNodes));
+    window.localStorage.setItem(COMMITTED_EDGE_STORAGE_KEY, JSON.stringify(nextCommittedEdges));
+
+    const payload = {
+      committedRequirementCount: committedNodeAdds.length,
+      archivedProposedCount,
+      committedEdgeCount: committedEdgeAdds.length,
+      archivedEdgeCount,
+      note: "Committed proposed requirements via exact CONFIRMED",
+    };
+
+    appendAuditEvent("FOUNDER_COMMIT_CONFIRMED", payload);
+    setCommitResult(payload);
+    setCommitError("");
+    setFounderCommitText("");
+    setRefreshToken((value) => value + 1);
+  }
 
   function renderTree(nodes) {
     if (nodes.length === 0) {
@@ -329,6 +497,37 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
             </tbody>
           </table>
         )}
+        <div>
+          <h3>Founder Commit</h3>
+          <p>Only Founder commits. This moves proposed -&gt; committed.</p>
+          <label htmlFor="founder-confirmed-input">
+            Type CONFIRMED to commit proposed requirements
+          </label>
+          <br />
+          <input
+            id="founder-confirmed-input"
+            value={founderCommitText}
+            onChange={(event) => {
+              setFounderCommitText(event.target.value);
+              setCommitError("");
+            }}
+          />{" "}
+          <button
+            type="button"
+            onClick={handleFounderCommit}
+            disabled={founderCommitText !== COMMIT_CONFIRM_TEXT}
+          >
+            Commit
+          </button>
+          {commitError ? <p>{commitError}</p> : null}
+          {commitResult ? (
+            <p>
+              Commit success: committedRequirements={commitResult.committedRequirementCount},
+              archivedProposed={commitResult.archivedProposedCount}, committedEdges=
+              {commitResult.committedEdgeCount}, archivedEdges={commitResult.archivedEdgeCount}
+            </p>
+          ) : null}
+        </div>
       </section>
     );
   }
