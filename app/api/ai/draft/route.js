@@ -1,158 +1,282 @@
+import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 
 const ALLOWED_MODES = new Set(["requirements", "decisions", "business"]);
 const MOCK_BASE_TIME = Date.UTC(2026, 0, 1, 0, 0, 0);
+const DEFAULT_OWNER = "founder";
+const DEFAULT_RISK = "medium";
+const DEFAULT_RELATIONSHIP_TYPE = "relates_to";
+const CREATED_BY = "ai";
 
 function normalizeMode(mode) {
   const value = typeof mode === "string" ? mode.toLowerCase().trim() : "";
   return ALLOWED_MODES.has(value) ? value : "requirements";
 }
 
-function deterministicIso(offsetMinutes) {
-  return new Date(MOCK_BASE_TIME + offsetMinutes * 60_000).toISOString();
+function normalizePrompt(prompt) {
+  return typeof prompt === "string" ? prompt.trim().replace(/\s+/g, " ") : "";
 }
 
-function createProposedNode({ id, type, title, index }) {
+function toIdPart(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function toSeed(prompt, mode) {
+  return crypto
+    .createHash("sha256")
+    .update(`${normalizePrompt(prompt)}|${mode}`)
+    .digest("hex");
+}
+
+function seedKey(seed) {
+  return seed.slice(0, 10);
+}
+
+function seedOffsetMinutes(seed) {
+  const value = Number.parseInt(seed.slice(0, 8), 16);
+  return Number.isFinite(value) ? value % (365 * 24 * 60) : 0;
+}
+
+function deterministicIso(seed, offsetMinutes) {
+  const minutes = seedOffsetMinutes(seed) + offsetMinutes;
+  return new Date(MOCK_BASE_TIME + minutes * 60_000).toISOString();
+}
+
+function coerceString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function coerceNumber(value, fallback = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function coerceIso(value, seed, index) {
+  const candidate = coerceString(value);
+  if (candidate) {
+    const parsed = Date.parse(candidate);
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+  }
+  return deterministicIso(seed, index);
+}
+
+function promptSnippet(prompt) {
+  const clean = normalizePrompt(prompt);
+  if (!clean) {
+    return "founder governance os";
+  }
+  return clean.slice(0, 44);
+}
+
+function createProposedNode({
+  id,
+  type,
+  title,
+  seed,
+  index,
+  version = 1,
+  owner = DEFAULT_OWNER,
+  risk = DEFAULT_RISK,
+  parentId = null,
+  createdAt,
+}) {
   return {
     id,
     type,
     title,
     stage: "proposed",
     status: "queued",
-    risk: "medium",
-    createdAt: deterministicIso(index),
-    createdBy: "AI",
+    version,
+    createdAt: coerceIso(createdAt, seed, index),
+    createdBy: CREATED_BY,
+    owner,
+    risk,
+    parentId,
+    archived: false,
   };
 }
 
-function createProposedEdge({ id, from, to, index }) {
+function createProposedEdge({
+  id,
+  from,
+  to,
+  seed,
+  index,
+  relationshipType = DEFAULT_RELATIONSHIP_TYPE,
+  createdAt,
+}) {
   return {
     id,
     from,
     to,
-    relationshipType: "relates_to",
+    relationshipType,
     stage: "proposed",
-    createdAt: deterministicIso(100 + index),
-    createdBy: "AI",
+    createdAt: coerceIso(createdAt, seed, 100 + index),
+    createdBy: CREATED_BY,
+    archived: false,
   };
 }
 
-function getDeterministicMockBundle(mode) {
+function buildChainEdges(nodes, seed, key) {
+  const edges = [];
+  for (let index = 0; index < Math.min(nodes.length - 1, 5); index += 1) {
+    edges.push(
+      createProposedEdge({
+        id: `edge:${key}:chain:${index + 1}`,
+        from: nodes[index].id,
+        to: nodes[index + 1].id,
+        seed,
+        index: index + 1,
+      }),
+    );
+  }
+  return edges;
+}
+
+function getMockTemplates(mode, snippet) {
   if (mode === "decisions") {
-    const nodes = [
-      createProposedNode({ id: "decision:mock:1", type: "Decision", title: "Set founder review cadence", index: 1 }),
-      createProposedNode({ id: "decision:mock:2", type: "Decision", title: "Adopt proposed-first workflow", index: 2 }),
-      createProposedNode({ id: "requirement:mock:1", type: "Requirement", title: "Track decision confidence bands", index: 3 }),
-      createProposedNode({ id: "task:mock:1", type: "Task", title: "Draft weekly council memo", index: 4 }),
-      createProposedNode({ id: "task:mock:2", type: "Task", title: "Review dependency impacts", index: 5 }),
-      createProposedNode({ id: "risk:mock:1", type: "Risk", title: "Monitor drift before commit", index: 6 }),
+    return [
+      { type: "Decision", title: `Decision lane for: ${snippet}` },
+      { type: "Decision", title: "Founder review cadence definition" },
+      { type: "Requirement", title: "Decision confidence tracking fields" },
+      { type: "Task", title: "Draft weekly council brief" },
+      { type: "Task", title: "Review dependency impacts" },
+      { type: "Risk", title: "Monitor drift before commit" },
     ];
-
-    const edges = [
-      createProposedEdge({ id: "edge:mock:1", from: nodes[0].id, to: nodes[2].id, index: 1 }),
-      createProposedEdge({ id: "edge:mock:2", from: nodes[1].id, to: nodes[2].id, index: 2 }),
-      createProposedEdge({ id: "edge:mock:3", from: nodes[2].id, to: nodes[3].id, index: 3 }),
-      createProposedEdge({ id: "edge:mock:4", from: nodes[2].id, to: nodes[4].id, index: 4 }),
-      createProposedEdge({ id: "edge:mock:5", from: nodes[5].id, to: nodes[0].id, index: 5 }),
-    ];
-
-    return { nodes, edges };
   }
 
   if (mode === "business") {
-    const nodes = [
-      createProposedNode({ id: "project:mock:1", type: "Project", title: "Founder Venture Governance OS", index: 1 }),
-      createProposedNode({ id: "requirement:mock:1", type: "Requirement", title: "Keep commits founder-confirmed", index: 2 }),
-      createProposedNode({ id: "decision:mock:1", type: "Decision", title: "Mock-first AI drafting enabled", index: 3 }),
-      createProposedNode({ id: "task:mock:1", type: "Task", title: "Publish council status snapshots", index: 4 }),
-      createProposedNode({ id: "metric:mock:1", type: "Metric", title: "Proposal throughput per week", index: 5 }),
-      createProposedNode({ id: "risk:mock:1", type: "Risk", title: "Unreviewed proposal backlog", index: 6 }),
+    return [
+      { type: "Project", title: `Business graph for: ${snippet}` },
+      { type: "Requirement", title: "Maintain founder-confirmed commits" },
+      { type: "Decision", title: "Adopt mock-first AI drafting" },
+      { type: "Task", title: "Publish council status snapshots" },
+      { type: "Metric", title: "Proposal throughput per week" },
+      { type: "Risk", title: "Unreviewed proposal backlog" },
     ];
-
-    const edges = [
-      createProposedEdge({ id: "edge:mock:1", from: nodes[0].id, to: nodes[1].id, index: 1 }),
-      createProposedEdge({ id: "edge:mock:2", from: nodes[0].id, to: nodes[2].id, index: 2 }),
-      createProposedEdge({ id: "edge:mock:3", from: nodes[2].id, to: nodes[3].id, index: 3 }),
-      createProposedEdge({ id: "edge:mock:4", from: nodes[3].id, to: nodes[4].id, index: 4 }),
-      createProposedEdge({ id: "edge:mock:5", from: nodes[5].id, to: nodes[0].id, index: 5 }),
-    ];
-
-    return { nodes, edges };
   }
 
-  const nodes = [
-    createProposedNode({ id: "requirement:mock:1", type: "Requirement", title: "Founder-only commit at boundary", index: 1 }),
-    createProposedNode({ id: "requirement:mock:2", type: "Requirement", title: "Require exact CONFIRMED for commit", index: 2 }),
-    createProposedNode({ id: "requirement:mock:3", type: "Requirement", title: "AI draft must remain proposed-only", index: 3 }),
-    createProposedNode({ id: "task:mock:1", type: "Task", title: "Validate audit append-only integrity", index: 4 }),
-    createProposedNode({ id: "task:mock:2", type: "Task", title: "Verify archive-only deletion path", index: 5 }),
-    createProposedNode({ id: "risk:mock:1", type: "Risk", title: "Detect unauthorized commit attempts", index: 6 }),
+  return [
+    { type: "Requirement", title: `Requirements draft for: ${snippet}` },
+    { type: "Requirement", title: "Founder-only commit at boundary" },
+    { type: "Requirement", title: "Require exact CONFIRMED for commit" },
+    { type: "Task", title: "Validate audit append-only integrity" },
+    { type: "Task", title: "Verify archive-only deletion path" },
+    { type: "Risk", title: "Detect unauthorized commit attempts" },
   ];
-
-  const edges = [
-    createProposedEdge({ id: "edge:mock:1", from: nodes[0].id, to: nodes[1].id, index: 1 }),
-    createProposedEdge({ id: "edge:mock:2", from: nodes[1].id, to: nodes[2].id, index: 2 }),
-    createProposedEdge({ id: "edge:mock:3", from: nodes[2].id, to: nodes[3].id, index: 3 }),
-    createProposedEdge({ id: "edge:mock:4", from: nodes[3].id, to: nodes[4].id, index: 4 }),
-    createProposedEdge({ id: "edge:mock:5", from: nodes[5].id, to: nodes[0].id, index: 5 }),
-  ];
-
-  return { nodes, edges };
 }
 
-function sanitizeAIBundle(bundle, mode) {
-  const fallback = getDeterministicMockBundle(mode);
-  const sourceNodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
-  const sourceEdges = Array.isArray(bundle?.edges) ? bundle.edges : [];
+function getDeterministicMockBundle(mode, prompt) {
+  const seed = toSeed(prompt, mode);
+  const key = seedKey(seed);
+  const snippet = promptSnippet(prompt);
+  const templates = getMockTemplates(mode, snippet);
 
-  const nodes = sourceNodes.slice(0, 10).map((node, index) =>
+  const nodes = templates.map((template, index) =>
     createProposedNode({
-      id:
-        typeof node?.id === "string" && node.id.trim()
-          ? node.id.trim()
-          : `${mode}:ai:${index + 1}`,
-      type:
-        typeof node?.type === "string" && node.type.trim()
-          ? node.type.trim()
-          : mode === "decisions"
-            ? "Decision"
-            : "Requirement",
-      title:
-        typeof node?.title === "string" && node.title.trim()
-          ? node.title.trim()
-          : `AI Draft ${index + 1}`,
+      id: `${toIdPart(template.type)}:${key}:${index + 1}`,
+      type: template.type,
+      title: template.title,
+      seed,
       index: index + 1,
+      version: 1,
+      owner: DEFAULT_OWNER,
+      risk: template.risk || DEFAULT_RISK,
+      parentId: null,
     }),
   );
 
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = sourceEdges
-    .slice(0, 10)
-    .map((edge, index) => {
-      const from = typeof edge?.from === "string" ? edge.from.trim() : "";
-      const to = typeof edge?.to === "string" ? edge.to.trim() : "";
-      if (!nodeIds.has(from) || !nodeIds.has(to)) {
-        return null;
-      }
-      return createProposedEdge({
-        id:
-          typeof edge?.id === "string" && edge.id.trim()
-            ? edge.id.trim()
-            : `${mode}:ai:edge:${index + 1}`,
-        from,
-        to,
-        index: index + 1,
-      });
-    })
-    .filter(Boolean);
+  const edges = buildChainEdges(nodes, seed, key);
+  return { nodes, edges };
+}
+
+function sanitizeAIBundle(bundle, mode, prompt) {
+  const seed = toSeed(prompt, mode);
+  const key = seedKey(seed);
+  const fallback = getDeterministicMockBundle(mode, prompt);
+  const sourceNodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
+  const sourceEdges = Array.isArray(bundle?.edges) ? bundle.edges : [];
+
+  const nodeIdsSeen = new Set();
+  const nodes = sourceNodes.slice(0, 10).map((node, index) => {
+    const baseId =
+      coerceString(node?.id) ||
+      `${toIdPart(node?.type || mode)}:${key}:ai:${index + 1}`;
+
+    let id = baseId;
+    let dedupeIndex = 2;
+    while (nodeIdsSeen.has(id)) {
+      id = `${baseId}:${dedupeIndex}`;
+      dedupeIndex += 1;
+    }
+    nodeIdsSeen.add(id);
+
+    return createProposedNode({
+      id,
+      type:
+        coerceString(node?.type) ||
+        (mode === "decisions"
+          ? "Decision"
+          : mode === "business"
+            ? "Project"
+            : "Requirement"),
+      title:
+        coerceString(node?.title) ||
+        `AI Draft ${index + 1}: ${promptSnippet(prompt)}`,
+      seed,
+      index: index + 1,
+      version: coerceNumber(node?.version, 1),
+      owner: coerceString(node?.owner) || DEFAULT_OWNER,
+      risk: coerceString(node?.risk) || DEFAULT_RISK,
+      parentId: coerceString(node?.parentId) || null,
+      createdAt: coerceString(node?.createdAt) || undefined,
+    });
+  });
 
   if (nodes.length === 0) {
     return fallback;
   }
 
+  const validNodeIds = new Set(nodes.map((node) => node.id));
+  const edgeIdsSeen = new Set();
+  const edges = sourceEdges
+    .slice(0, 10)
+    .map((edge, index) => {
+      const from = coerceString(edge?.from);
+      const to = coerceString(edge?.to);
+      if (!validNodeIds.has(from) || !validNodeIds.has(to)) {
+        return null;
+      }
+
+      const baseId = coerceString(edge?.id) || `edge:${key}:ai:${index + 1}`;
+      let id = baseId;
+      let dedupeIndex = 2;
+      while (edgeIdsSeen.has(id)) {
+        id = `${baseId}:${dedupeIndex}`;
+        dedupeIndex += 1;
+      }
+      edgeIdsSeen.add(id);
+
+      return createProposedEdge({
+        id,
+        from,
+        to,
+        seed,
+        index: index + 1,
+        relationshipType: coerceString(edge?.relationshipType) || DEFAULT_RELATIONSHIP_TYPE,
+        createdAt: coerceString(edge?.createdAt) || undefined,
+      });
+    })
+    .filter(Boolean);
+
   return {
     nodes,
-    edges: edges.length > 0 ? edges : fallback.edges.slice(0, 5),
+    edges: edges.length > 0 ? edges : buildChainEdges(nodes, seed, key),
   };
 }
 
@@ -212,7 +336,7 @@ export async function POST(request) {
     );
   }
 
-  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+  const prompt = normalizePrompt(body?.prompt);
   if (!prompt) {
     return NextResponse.json(
       { ok: false, error: "prompt is required" },
@@ -226,7 +350,7 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       source: "mock",
-      bundle: getDeterministicMockBundle(mode),
+      bundle: getDeterministicMockBundle(mode, prompt),
     });
   }
 
@@ -235,13 +359,13 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       source: "ai",
-      bundle: sanitizeAIBundle(aiBundle, mode),
+      bundle: sanitizeAIBundle(aiBundle, mode, prompt),
     });
   } catch {
     return NextResponse.json({
       ok: true,
       source: "mock",
-      bundle: getDeterministicMockBundle(mode),
+      bundle: getDeterministicMockBundle(mode, prompt),
     });
   }
 }
