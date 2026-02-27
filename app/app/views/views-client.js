@@ -13,6 +13,8 @@ const AUDIT_STORAGE_KEY = "draft_audit_log";
 const FALLBACK_AUDIT_STORAGE_KEY = "audit_events";
 const COMMIT_CONFIRM_TEXT = "CONFIRMED";
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
+const RISK_LEVELS = ["low", "medium", "high"];
+const EDITABLE_STATUSES = ["queued", "in_progress", "review", "complete"];
 
 function normalizeRelationships(node) {
   if (Array.isArray(node.relationships)) {
@@ -228,6 +230,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [founderCommitText, setFounderCommitText] = useState("");
   const [commitError, setCommitError] = useState("");
   const [commitResult, setCommitResult] = useState(null);
+  const [rowEdits, setRowEdits] = useState({});
+  const [savedNodeId, setSavedNodeId] = useState("");
   const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
   const activeEdges = useMemo(() => loadDraftEdges(), [refreshToken]);
   const filteredNodes =
@@ -289,6 +293,98 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
 
     return grouped;
   }, [filteredRelationships]);
+
+  function isEditableProposedRequirement(node) {
+    const stage = typeof node?.stage === "string" ? node.stage.toLowerCase() : "";
+    return node?.type === "Requirement" && stage === "proposed" && node?.archived !== true;
+  }
+
+  function getRowValue(node, field) {
+    if (rowEdits[node.id] && Object.prototype.hasOwnProperty.call(rowEdits[node.id], field)) {
+      return rowEdits[node.id][field];
+    }
+
+    if (field === "risk") {
+      return typeof node.risk === "string" && node.risk ? node.risk : "medium";
+    }
+
+    if (field === "status") {
+      return typeof node.status === "string" && node.status ? node.status : "queued";
+    }
+
+    return typeof node[field] === "string" ? node[field] : "";
+  }
+
+  function updateRowEdit(nodeId, field, value) {
+    setSavedNodeId("");
+    setRowEdits((previous) => ({
+      ...previous,
+      [nodeId]: {
+        ...(previous[nodeId] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  function isRowDirty(node) {
+    const title = getRowValue(node, "title");
+    const risk = getRowValue(node, "risk");
+    const status = getRowValue(node, "status");
+    return (
+      title !== (typeof node.title === "string" ? node.title : "") ||
+      risk !== (typeof node.risk === "string" && node.risk ? node.risk : "medium") ||
+      status !== (typeof node.status === "string" && node.status ? node.status : "queued")
+    );
+  }
+
+  function handleSaveProposedRow(node) {
+    if (!isEditableProposedRequirement(node)) {
+      return;
+    }
+
+    const nextTitle = getRowValue(node, "title").trim();
+    const nextRisk = getRowValue(node, "risk");
+    const nextStatus = getRowValue(node, "status");
+
+    const fieldsChanged = {};
+    if (nextTitle && nextTitle !== node.title) {
+      fieldsChanged.title = nextTitle;
+    }
+    if (RISK_LEVELS.includes(nextRisk) && nextRisk !== (node.risk || "medium")) {
+      fieldsChanged.risk = nextRisk;
+    }
+    if (EDITABLE_STATUSES.includes(nextStatus) && nextStatus !== (node.status || "queued")) {
+      fieldsChanged.status = nextStatus;
+    }
+
+    if (Object.keys(fieldsChanged).length === 0) {
+      return;
+    }
+
+    const draftNodes = loadStoredArray(STORAGE_KEY);
+    const nextNodes = draftNodes.map((item) =>
+      item?.id === node.id
+        ? {
+            ...item,
+            ...fieldsChanged,
+          }
+        : item,
+    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextNodes));
+
+    appendAuditEvent("PROPOSED_NODE_EDITED", {
+      nodeId: node.id,
+      fieldsChanged,
+    });
+
+    setSavedNodeId(node.id);
+    setRowEdits((previous) => {
+      const next = { ...previous };
+      delete next[node.id];
+      return next;
+    });
+    setRefreshToken((value) => value + 1);
+  }
 
   function handleFounderCommit() {
     if (founderCommitText !== COMMIT_CONFIRM_TEXT) {
@@ -482,18 +578,62 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                 <th>Status</th>
                 <th>Version</th>
                 <th>Owner</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {proposedRequirementNodes.map((node) => (
-                <tr key={node.id}>
-                  <td>{node.title}</td>
-                  <td>{node.risk || "-"}</td>
-                  <td>{node.status || "-"}</td>
-                  <td>{node.version ?? "-"}</td>
-                  <td>{node.owner || "-"}</td>
-                </tr>
-              ))}
+              {proposedRequirementNodes.map((node) => {
+                const editable = isEditableProposedRequirement(node);
+                return (
+                  <tr key={node.id}>
+                    <td>
+                      <input
+                        value={getRowValue(node, "title")}
+                        disabled={!editable}
+                        onChange={(event) => updateRowEdit(node.id, "title", event.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={getRowValue(node, "risk")}
+                        disabled={!editable}
+                        onChange={(event) => updateRowEdit(node.id, "risk", event.target.value)}
+                      >
+                        {RISK_LEVELS.map((risk) => (
+                          <option key={risk} value={risk}>
+                            {risk}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={getRowValue(node, "status")}
+                        disabled={!editable}
+                        onChange={(event) => updateRowEdit(node.id, "status", event.target.value)}
+                      >
+                        {EDITABLE_STATUSES.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>{node.version ?? "-"}</td>
+                    <td>{node.owner || "-"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveProposedRow(node)}
+                        disabled={!editable || !isRowDirty(node)}
+                      >
+                        Save
+                      </button>
+                      {savedNodeId === node.id ? <span> Saved</span> : null}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
