@@ -936,8 +936,11 @@ export default function BrainstormClient() {
                   <div className="mt-2 text-xs text-slate-400">No audit events yet.</div>
                 ) : (
                   <div className="mt-2 max-h-32 space-y-1 overflow-auto pr-1 text-xs text-slate-300">
-                    {[...auditEvents].reverse().map((event) => (
-                      <div key={event.id} className="rounded-lg border border-red-900/20 bg-neutral-950 px-2 py-1">
+                    {[...auditEvents].reverse().map((event, index) => (
+                      <div
+                        key={`${event?.id || `${event?.type || "event"}-${event?.createdAt || "na"}`}-${index}`}
+                        className="rounded-lg border border-red-900/20 bg-neutral-950 px-2 py-1"
+                      >
                         <div className="font-semibold text-slate-200">{event.type}</div>
                         <div className="text-[11px] text-slate-400">{event.createdAt}</div>
                         {formatAuditPayload(event.payload) ? (
