@@ -223,8 +223,143 @@ function readRecruitedExperts() {
   }
 }
 
+function readStoredArray(key) {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredArray(key, value) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function readDraftGraph(scope = "brainstorm") {
+  void scope;
+  return {
+    nodes: readStoredArray(DRAFT_NODE_STORAGE_KEY),
+    edges: readStoredArray(DRAFT_EDGE_STORAGE_KEY),
+  };
+}
+
+function writeDraftGraph(scope = "brainstorm", next) {
+  void scope;
+  const nodes = Array.isArray(next?.nodes) ? next.nodes : [];
+  const edges = Array.isArray(next?.edges) ? next.edges : [];
+  writeStoredArray(DRAFT_NODE_STORAGE_KEY, nodes);
+  writeStoredArray(DRAFT_EDGE_STORAGE_KEY, edges);
+}
+
+function mergeProposal(scope = "brainstorm", proposal) {
+  void scope;
+  const current = readDraftGraph(scope);
+  const nodeIds = new Set(current.nodes.map((node) => node?.id).filter(Boolean));
+  const edgeIds = new Set(current.edges.map((edge) => edge?.id).filter(Boolean));
+  const nextNodes = [...current.nodes];
+  const nextEdges = [...current.edges];
+  const addedNodeRecords = [];
+  const addedEdgeRecords = [];
+
+  for (const node of Array.isArray(proposal?.proposedNodes) ? proposal.proposedNodes : []) {
+    if (!node?.id || nodeIds.has(node.id)) {
+      continue;
+    }
+    nodeIds.add(node.id);
+    nextNodes.push(node);
+    addedNodeRecords.push(node);
+  }
+
+  for (const edge of Array.isArray(proposal?.proposedEdges) ? proposal.proposedEdges : []) {
+    if (!edge?.id || edgeIds.has(edge.id)) {
+      continue;
+    }
+    edgeIds.add(edge.id);
+    nextEdges.push(edge);
+    addedEdgeRecords.push(edge);
+  }
+
+  writeDraftGraph(scope, { nodes: nextNodes, edges: nextEdges });
+
+  return {
+    addedNodes: addedNodeRecords.length,
+    addedEdges: addedEdgeRecords.length,
+    addedNodeRecords,
+    addedEdgeRecords,
+    totalNodes: nextNodes.length,
+    totalEdges: nextEdges.length,
+  };
+}
+
+function ideaClusterFromNodeType(type) {
+  const value = String(type || "").toLowerCase();
+  if (value === "project" || value === "metric") {
+    return "Revenue";
+  }
+  if (value === "task") {
+    return "Ops";
+  }
+  if (value === "decision" || value === "risk") {
+    return "Governance";
+  }
+  if (value === "concept") {
+    return "Growth";
+  }
+  if (value === "requirement") {
+    return "Core";
+  }
+  return "Core";
+}
+
+function ideasFromProposedNodes(nodes) {
+  return (Array.isArray(nodes) ? nodes : [])
+    .filter((node) => node?.id && node?.archived !== true && node?.stage === "proposed")
+    .map((node) => ({
+      id: node.id,
+      label: typeof node.title === "string" && node.title.trim() ? node.title.trim() : node.id,
+      cluster: ideaClusterFromNodeType(node.type),
+    }));
+}
+
+function mergeIdeasById(currentIdeas, incomingIdeas) {
+  const next = [...(Array.isArray(currentIdeas) ? currentIdeas : [])];
+  const ids = new Set(next.map((item) => item?.id).filter(Boolean));
+  for (const idea of Array.isArray(incomingIdeas) ? incomingIdeas : []) {
+    if (!idea?.id || ids.has(idea.id)) {
+      continue;
+    }
+    ids.add(idea.id);
+    next.push(idea);
+  }
+  return next;
+}
+
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
+  const [chatMessages, setChatMessages] = useState(() => [
+    {
+      id: "msg:init:founder",
+      role: "founder",
+      text: "Lock next 3 decisions to raise stability.",
+    },
+    {
+      id: "msg:init:governance",
+      role: "assistant",
+      text: "Share your venture direction and I will draft proposed ideas for the gravity map.",
+    },
+  ]);
   const [draftPrompt, setDraftPrompt] = useState("");
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftError, setDraftError] = useState("");
@@ -285,19 +420,24 @@ export default function BrainstormClient() {
   const activeArenaRef = fullscreen === "map" ? fullscreenArenaRef : arenaRef;
   const nodes = useGravityNodes(ideasState, activeArenaRef);
   const preview = useMemo(() => {
-    if (!draftResult?.bundle) {
+    const bundleNodes = Array.isArray(draftResult?.bundle?.nodes) ? draftResult.bundle.nodes : [];
+    const bundleEdges = Array.isArray(draftResult?.bundle?.edges) ? draftResult.bundle.edges : [];
+    const proposedNodes = Array.isArray(draftResult?.proposedNodes) ? draftResult.proposedNodes : [];
+    const proposedEdges = Array.isArray(draftResult?.proposedEdges) ? draftResult.proposedEdges : [];
+    const nextNodes = proposedNodes.length ? proposedNodes : bundleNodes;
+    const nextEdges = proposedEdges.length ? proposedEdges : bundleEdges;
+    if (!nextNodes.length && !nextEdges.length) {
       return null;
     }
 
-    const nodes = Array.isArray(draftResult.bundle.nodes) ? draftResult.bundle.nodes : [];
-    const edges = Array.isArray(draftResult.bundle.edges) ? draftResult.bundle.edges : [];
-    const titleById = new Map(nodes.map((node) => [node.id, node.title]));
+    const titleById = new Map(nextNodes.map((node) => [node.id, node.title]));
 
     return {
       source: draftResult.source || "mock",
       fallbackReason: draftResult.fallbackReason || "",
-      nodes,
-      edges,
+      assistantText: typeof draftResult.assistantText === "string" ? draftResult.assistantText : "",
+      nodes: nextNodes,
+      edges: nextEdges,
       titleById,
     };
   }, [draftResult]);
@@ -370,7 +510,11 @@ export default function BrainstormClient() {
 
     const nonce = "";
     const eventType = "AI_DRAFT_GENERATED";
-    await requestDraft({ prompt, nonce, eventType });
+    try {
+      await requestDraft({ prompt, nonce, eventType, mode: "requirements" });
+    } catch {
+      // Error state handled in requestDraft.
+    }
   }
 
   async function handleRegenerateDraft() {
@@ -382,10 +526,49 @@ export default function BrainstormClient() {
 
     const nonce = String(Date.now());
     const eventType = "AI_DRAFT_REGENERATED";
-    await requestDraft({ prompt, nonce, eventType });
+    try {
+      await requestDraft({ prompt, nonce, eventType, mode: "requirements" });
+    } catch {
+      // Error state handled in requestDraft.
+    }
   }
 
-  async function requestDraft({ prompt, nonce, eventType }) {
+  async function handleSendMessage() {
+    const prompt = message.trim();
+    if (!prompt) {
+      setDraftError("Enter a message before sending.");
+      return;
+    }
+
+    setChatMessages((previous) => [
+      ...previous,
+      { id: `msg:founder:${Date.now()}`, role: "founder", text: prompt },
+    ]);
+    setMessage("");
+    setDraftPrompt(prompt);
+
+    try {
+      const data = await requestDraft({
+        prompt,
+        nonce: `${Date.now()}`,
+        eventType: "ai_generate",
+        mode: "business",
+        scope: "brainstorm",
+      });
+      setChatMessages((previous) => [
+        ...previous,
+        {
+          id: `msg:assistant:${Date.now()}`,
+          role: "assistant",
+          text: data?.assistantText || "Draft prepared. Review and apply to update the map.",
+        },
+      ]);
+    } catch {
+      // Error state handled in requestDraft.
+    }
+  }
+
+  async function requestDraft({ prompt, nonce, eventType, mode = "requirements", scope = "" }) {
     setDraftLoading(true);
     setDraftError("");
     setApplyResult(null);
@@ -402,7 +585,16 @@ export default function BrainstormClient() {
               })
               .join("\n")}`
           : "";
-      const body = { prompt: `${prompt}${expertContext}`, mode: "requirements" };
+      const body = {
+        prompt: `${prompt}${expertContext}`,
+        mode,
+      };
+      if (scope) {
+        body.scope = scope;
+        body.context = {
+          recruitedExpertCount: recruitedExperts.length,
+        };
+      }
       if (nonce) {
         body.nonce = nonce;
       }
@@ -413,23 +605,42 @@ export default function BrainstormClient() {
       });
 
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.ok || !data?.bundle) {
+      const responseBundle = data?.bundle && typeof data.bundle === "object" ? data.bundle : {};
+      const proposedNodes = Array.isArray(data?.proposedNodes)
+        ? data.proposedNodes
+        : Array.isArray(responseBundle.nodes)
+          ? responseBundle.nodes
+          : [];
+      const proposedEdges = Array.isArray(data?.proposedEdges)
+        ? data.proposedEdges
+        : Array.isArray(responseBundle.edges)
+          ? responseBundle.edges
+          : [];
+      if (!response.ok || !data?.ok || (!proposedNodes.length && !proposedEdges.length)) {
         throw new Error(data?.error || "Failed to generate draft bundle.");
       }
 
       const headerMode = response.headers.get("X-AI-Mode");
       const source = headerMode === "ai" ? "ai" : (data.source || "mock");
       const fallbackReason = typeof data?.fallbackReason === "string" ? data.fallbackReason : "";
-      setDraftResult({
+      const normalized = {
         ...data,
         source,
         fallbackReason,
-      });
-      const nodeCount = Array.isArray(data.bundle.nodes) ? data.bundle.nodes.length : 0;
-      const edgeCount = Array.isArray(data.bundle.edges) ? data.bundle.edges.length : 0;
+        bundle: {
+          nodes: proposedNodes,
+          edges: proposedEdges,
+        },
+        proposedNodes,
+        proposedEdges,
+      };
+      setDraftResult(normalized);
+      const nodeCount = proposedNodes.length;
+      const edgeCount = proposedEdges.length;
       appendAuditEvent(eventType, {
         prompt,
-        mode: "requirements",
+        mode,
+        scope: scope || "default",
         source,
         fallbackReason,
         nodeCount,
@@ -437,23 +648,13 @@ export default function BrainstormClient() {
         recruitedExpertCount: recruitedExperts.length,
         nonce,
       });
+      return normalized;
     } catch (error) {
-      setDraftError(error instanceof Error ? error.message : "Failed to generate draft bundle.");
+      const messageText = error instanceof Error ? error.message : "Failed to generate draft bundle.";
+      setDraftError(messageText);
+      throw error;
     } finally {
       setDraftLoading(false);
-    }
-  }
-
-  function readStoredArray(key) {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) {
-        return [];
-      }
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
     }
   }
 
@@ -465,49 +666,34 @@ export default function BrainstormClient() {
 
     setDraftError("");
 
-    const storedNodes = readStoredArray(DRAFT_NODE_STORAGE_KEY);
-    const storedEdges = readStoredArray(DRAFT_EDGE_STORAGE_KEY);
-    const nodeIds = new Set(storedNodes.map((node) => node?.id).filter(Boolean));
-    const edgeIds = new Set(storedEdges.map((edge) => edge?.id).filter(Boolean));
-
-    let addedNodes = 0;
-    let addedEdges = 0;
-    const nextNodes = [...storedNodes];
-    const nextEdges = [...storedEdges];
-
-    for (const node of preview.nodes) {
-      if (!node?.id || nodeIds.has(node.id)) {
-        continue;
-      }
-      nodeIds.add(node.id);
-      nextNodes.push(node);
-      addedNodes += 1;
-    }
-
-    for (const edge of preview.edges) {
-      if (!edge?.id || edgeIds.has(edge.id)) {
-        continue;
-      }
-      edgeIds.add(edge.id);
-      nextEdges.push(edge);
-      addedEdges += 1;
-    }
-
-    window.localStorage.setItem(DRAFT_NODE_STORAGE_KEY, JSON.stringify(nextNodes));
-    window.localStorage.setItem(DRAFT_EDGE_STORAGE_KEY, JSON.stringify(nextEdges));
-
-    setApplyResult({
-      addedNodes,
-      addedEdges,
-      totalNodes: nextNodes.length,
-      totalEdges: nextEdges.length,
+    const merged = mergeProposal("brainstorm", {
+      proposedNodes: preview.nodes,
+      proposedEdges: preview.edges,
     });
 
+    setApplyResult({
+      addedNodes: merged.addedNodes,
+      addedEdges: merged.addedEdges,
+      totalNodes: merged.totalNodes,
+      totalEdges: merged.totalEdges,
+    });
+    setIdeasState((previous) =>
+      mergeIdeasById(previous, ideasFromProposedNodes(merged.addedNodeRecords)),
+    );
+
     appendAuditEvent("AI_DRAFT_APPLIED", {
-      addedNodes,
-      addedEdges,
-      totalNodes: nextNodes.length,
-      totalEdges: nextEdges.length,
+      addedNodes: merged.addedNodes,
+      addedEdges: merged.addedEdges,
+      totalNodes: merged.totalNodes,
+      totalEdges: merged.totalEdges,
+    });
+    appendAuditEvent("ai_apply", {
+      scope: "brainstorm",
+      source: preview.source || "mock",
+      addedNodes: merged.addedNodes,
+      addedEdges: merged.addedEdges,
+      totalNodes: merged.totalNodes,
+      totalEdges: merged.totalEdges,
     });
   }
 
@@ -792,18 +978,21 @@ export default function BrainstormClient() {
                 !isFullscreen ? "h-20" : "",
               )}
             >
-              <div>
-                <span className="font-medium text-red-400">Founder:</span> Lock next 3 decisions to
-                raise stability.
+              <div className="space-y-1">
+                {chatMessages.map((entry) => (
+                  <div key={entry.id}>
+                    <span
+                      className={`font-medium ${
+                        entry.role === "founder" ? "text-red-400" : "text-amber-300"
+                      }`}
+                    >
+                      {entry.role === "founder" ? "Founder" : "AI"}:
+                    </span>{" "}
+                    {entry.text}
+                  </div>
+                ))}
               </div>
-              <div className="mt-1">
-                <span className="font-medium text-amber-300">Governance:</span> Confirm decision
-                object model fields.
-              </div>
-              <div className="mt-1">
-                <span className="font-medium text-indigo-300">Tech:</span> Ensure no silent
-                refactors on builds.
-              </div>
+              {draftLoading ? <div className="mt-2 text-xs text-slate-400">AI is drafting...</div> : null}
             </div>
             <div className="mt-3 flex gap-3">
               <input
@@ -811,8 +1000,19 @@ export default function BrainstormClient() {
                 onChange={(event) => setMessage(event.target.value)}
                 className="flex-1 rounded-xl border border-red-900/25 bg-neutral-900 px-4 py-2 text-sm outline-none"
                 placeholder="Message the team..."
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleSendMessage();
+                  }
+                }}
               />
-              <button className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-5 py-2 text-white shadow-lg">
+              <button
+                type="button"
+                onClick={() => void handleSendMessage()}
+                disabled={draftLoading || !message.trim()}
+                className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-5 py-2 text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+              >
                 Send
               </button>
             </div>
