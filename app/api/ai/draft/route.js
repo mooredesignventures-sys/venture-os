@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 const ALLOWED_MODES = new Set(["requirements", "decisions", "business"]);
 const ALLOWED_LEVELS = new Set(["baseline", "detailed"]);
+const ALLOWED_SCOPES = new Set(["requirements"]);
 const MOCK_BASE_TIME = Date.UTC(2026, 0, 1, 0, 0, 0);
 const DEFAULT_OWNER = "founder";
 const DEFAULT_RISK = "medium";
@@ -21,6 +22,11 @@ function normalizePrompt(prompt) {
 function normalizeLevel(level) {
   const value = typeof level === "string" ? level.toLowerCase().trim() : "";
   return ALLOWED_LEVELS.has(value) ? value : "detailed";
+}
+
+function normalizeScope(scope) {
+  const value = typeof scope === "string" ? scope.toLowerCase().trim() : "";
+  return ALLOWED_SCOPES.has(value) ? value : "";
 }
 
 function normalizeNonce(nonce) {
@@ -456,6 +462,27 @@ function classifyFallbackReason(error) {
   return "openai_runtime_error";
 }
 
+function buildScopedAssistantText(scope, prompt, bundle, source) {
+  const nodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
+  const sampleTitles = nodes
+    .map((node) => coerceString(node?.title))
+    .filter(Boolean)
+    .slice(0, 3);
+  const sampleText = sampleTitles.length ? ` Top items: ${sampleTitles.join(" | ")}` : "";
+  return `AI ${source === "ai" ? "live" : "fallback"} drafted ${nodes.length} proposed ${scope} items for "${promptSnippet(prompt)}".${sampleText}`;
+}
+
+function toScopedPayload(scope, prompt, source, bundle, fallbackReason = "") {
+  return {
+    ok: true,
+    source,
+    fallbackReason,
+    assistantText: buildScopedAssistantText(scope, prompt, bundle, source),
+    proposedNodes: Array.isArray(bundle?.nodes) ? bundle.nodes : [],
+    proposedEdges: Array.isArray(bundle?.edges) ? bundle.edges : [],
+  };
+}
+
 async function generateAIBundle(prompt, mode, level = "detailed") {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -607,15 +634,7 @@ async function generateAIBundle(prompt, mode, level = "detailed") {
 }
 
 export async function POST(request) {
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid JSON payload" },
-      { status: 400 },
-    );
-  }
+  const body = await request.json().catch(() => ({}));
 
   const prompt = normalizePrompt(body?.prompt);
   if (!prompt) {
@@ -628,27 +647,38 @@ export async function POST(request) {
   const mode = normalizeMode(body?.mode);
   const level = normalizeLevel(body?.level);
   const nonce = normalizeNonce(body?.nonce);
+  const scope = normalizeScope(body?.scope);
 
   if (process.env.VOS_FORCE_MOCK === "true") {
+    const bundle = getDeterministicMockBundle(mode, prompt, level, nonce);
+    const payload =
+      scope === "requirements"
+        ? toScopedPayload(scope, prompt, "mock", bundle, "forced_mock")
+        : {
+            ok: true,
+            source: "mock",
+            fallbackReason: "forced_mock",
+            bundle,
+          };
     return withAiHeaders(
-      {
-        ok: true,
-        source: "mock",
-        fallbackReason: "forced_mock",
-        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-      },
+      payload,
       "mock",
     );
   }
 
   if (!process.env.OPENAI_API_KEY) {
+    const bundle = getDeterministicMockBundle(mode, prompt, level, nonce);
+    const payload =
+      scope === "requirements"
+        ? toScopedPayload(scope, prompt, "mock", bundle, "missing_api_key")
+        : {
+            ok: true,
+            source: "mock",
+            fallbackReason: "missing_api_key",
+            bundle,
+          };
     return withAiHeaders(
-      {
-        ok: true,
-        source: "mock",
-        fallbackReason: "missing_api_key",
-        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-      },
+      payload,
       "mock",
     );
   }
@@ -656,35 +686,50 @@ export async function POST(request) {
   try {
     const aiBundle = await generateAIBundle(prompt, mode, level);
     if (!aiBundle) {
+      const bundle = getDeterministicMockBundle(mode, prompt, level, nonce);
+      const payload =
+        scope === "requirements"
+          ? toScopedPayload(scope, prompt, "mock", bundle, "openai_response_invalid")
+          : {
+              ok: true,
+              source: "mock",
+              fallbackReason: "openai_response_invalid",
+              bundle,
+            };
       return withAiHeaders(
-        {
-          ok: true,
-          source: "mock",
-          fallbackReason: "openai_response_invalid",
-          bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-        },
+        payload,
         "mock",
         "openai_response_invalid",
         true,
       );
     }
+    const sanitized = sanitizeAIBundle(aiBundle, mode, prompt, level, nonce);
+    const payload =
+      scope === "requirements"
+        ? toScopedPayload(scope, prompt, "ai", sanitized)
+        : {
+            ok: true,
+            source: "ai",
+            bundle: sanitized,
+          };
     return withAiHeaders(
-      {
-        ok: true,
-        source: "ai",
-        bundle: sanitizeAIBundle(aiBundle, mode, prompt, level, nonce),
-      },
+      payload,
       "ai",
     );
   } catch (error) {
     const fallbackReason = classifyFallbackReason(error);
+    const bundle = getDeterministicMockBundle(mode, prompt, level, nonce);
+    const payload =
+      scope === "requirements"
+        ? toScopedPayload(scope, prompt, "mock", bundle, fallbackReason)
+        : {
+            ok: true,
+            source: "mock",
+            fallbackReason,
+            bundle,
+          };
     return withAiHeaders(
-      {
-        ok: true,
-        source: "mock",
-        fallbackReason,
-        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-      },
+      payload,
       "mock",
       fallbackReason,
       true,

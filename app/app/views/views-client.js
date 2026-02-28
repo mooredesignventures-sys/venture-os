@@ -7,6 +7,8 @@ import SelectFilter from "../../../src/components/ui/select-filter";
 
 const STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
+const REQUIREMENTS_DRAFT_NODE_STORAGE_KEY = "requirements_draft_nodes";
+const REQUIREMENTS_DRAFT_EDGE_STORAGE_KEY = "requirements_draft_edges";
 const BASELINE_SNAPSHOT_STORAGE_KEY = "baseline_snapshots";
 const RECRUITED_EXPERTS_STORAGE_KEY = "recruited_experts";
 const COMMITTED_NODE_STORAGE_KEY = "committed_nodes";
@@ -76,13 +78,13 @@ function normalizeStatus(node) {
   return "active";
 }
 
-function loadDraftEdges() {
+function loadDraftEdges(key = EDGE_STORAGE_KEY) {
   if (typeof window === "undefined") {
     return [];
   }
 
   try {
-    const raw = window.localStorage.getItem(EDGE_STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) {
       return [];
     }
@@ -94,13 +96,13 @@ function loadDraftEdges() {
   }
 }
 
-function loadDraftNodes() {
+function loadDraftNodes(key = STORAGE_KEY) {
   if (typeof window === "undefined") {
     return [];
   }
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) {
       return [];
     }
@@ -240,10 +242,30 @@ function buildRelationships(nodes, edges) {
 }
 
 export default function ViewsClient({ mode, viewScope = "draft" }) {
+  const isRequirementsMode = mode === "requirements";
+  const draftNodeKey = isRequirementsMode ? REQUIREMENTS_DRAFT_NODE_STORAGE_KEY : STORAGE_KEY;
+  const draftEdgeKey = isRequirementsMode ? REQUIREMENTS_DRAFT_EDGE_STORAGE_KEY : EDGE_STORAGE_KEY;
   const [search, setSearch] = useState("");
   const [relationshipTypeFilter, setRelationshipTypeFilter] = useState("all");
   const [refreshToken, setRefreshToken] = useState(0);
   const [requirementsScope, setRequirementsScope] = useState("proposed");
+  const [requirementsChatInput, setRequirementsChatInput] = useState("");
+  const [requirementsChatMessages, setRequirementsChatMessages] = useState(() => [
+    {
+      id: "req-chat:init:founder",
+      role: "founder",
+      text: "Create initial requirements for a stable launch.",
+    },
+    {
+      id: "req-chat:init:assistant",
+      role: "assistant",
+      text: "Share your requirement goal and I will draft proposed requirement nodes and links.",
+    },
+  ]);
+  const [requirementsAiLoading, setRequirementsAiLoading] = useState(false);
+  const [requirementsAiError, setRequirementsAiError] = useState("");
+  const [requirementsAiPreview, setRequirementsAiPreview] = useState(null);
+  const [requirementsAiApplyResult, setRequirementsAiApplyResult] = useState("");
   const [founderCommitText, setFounderCommitText] = useState("");
   const [commitError, setCommitError] = useState("");
   const [commitResult, setCommitResult] = useState(null);
@@ -257,12 +279,12 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [baselinePreview, setBaselinePreview] = useState(null);
   const [baselineApplyResult, setBaselineApplyResult] = useState("");
   const [childProposalState, setChildProposalState] = useState({});
-  const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
+  const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes(draftNodeKey)), [draftNodeKey, refreshToken]);
   const committedNodes = useMemo(
     () => getActiveNodes(loadStoredArray(COMMITTED_NODE_STORAGE_KEY)),
     [refreshToken],
   );
-  const activeEdges = useMemo(() => loadDraftEdges(), [refreshToken]);
+  const activeEdges = useMemo(() => loadDraftEdges(draftEdgeKey), [draftEdgeKey, refreshToken]);
   const filteredNodes =
     viewScope === "committed"
       ? activeNodes.filter((node) => normalizeStatus(node) === "committed")
@@ -404,7 +426,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       return;
     }
 
-    const draftNodes = loadStoredArray(STORAGE_KEY);
+    const draftNodes = loadStoredArray(draftNodeKey);
     const nextNodes = draftNodes.map((item) =>
       item?.id === node.id
         ? {
@@ -413,7 +435,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
           }
         : item,
     );
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextNodes));
+    window.localStorage.setItem(draftNodeKey, JSON.stringify(nextNodes));
 
     appendAuditEvent("PROPOSED_NODE_EDITED", {
       nodeId: node.id,
@@ -435,8 +457,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       return;
     }
 
-    const draftNodes = loadStoredArray(STORAGE_KEY);
-    const draftEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const draftNodes = loadStoredArray(draftNodeKey);
+    const draftEdges = loadStoredArray(draftEdgeKey);
     const committedNodes = loadStoredArray(COMMITTED_NODE_STORAGE_KEY);
     const committedEdges = loadStoredArray(COMMITTED_EDGE_STORAGE_KEY);
 
@@ -512,8 +534,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       }));
     const nextCommittedEdges = [...committedEdges, ...committedEdgeAdds];
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextDraftNodes));
-    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(nextDraftEdges));
+    window.localStorage.setItem(draftNodeKey, JSON.stringify(nextDraftNodes));
+    window.localStorage.setItem(draftEdgeKey, JSON.stringify(nextDraftEdges));
     window.localStorage.setItem(COMMITTED_NODE_STORAGE_KEY, JSON.stringify(nextCommittedNodes));
     window.localStorage.setItem(COMMITTED_EDGE_STORAGE_KEY, JSON.stringify(nextCommittedEdges));
 
@@ -548,8 +570,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   }
 
   function handleExportSnapshot() {
-    const nodes = loadStoredArray(STORAGE_KEY);
-    const edges = loadStoredArray(EDGE_STORAGE_KEY);
+    const nodes = loadStoredArray(draftNodeKey);
+    const edges = loadStoredArray(draftEdgeKey);
     const snapshot = {
       schemaVersion: 1,
       createdAt: new Date().toISOString(),
@@ -588,8 +610,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       const fileNodes = Array.isArray(parsed?.nodes) ? parsed.nodes : [];
       const fileEdges = Array.isArray(parsed?.edges) ? parsed.edges : [];
 
-      const existingNodes = loadStoredArray(STORAGE_KEY);
-      const existingEdges = loadStoredArray(EDGE_STORAGE_KEY);
+      const existingNodes = loadStoredArray(draftNodeKey);
+      const existingEdges = loadStoredArray(draftEdgeKey);
       const existingNodeIds = new Set(
         existingNodes.map((node) => node?.id).filter((id) => typeof id === "string"),
       );
@@ -622,13 +644,13 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       return;
     }
 
-    const existingNodes = loadStoredArray(STORAGE_KEY);
-    const existingEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const existingNodes = loadStoredArray(draftNodeKey);
+    const existingEdges = loadStoredArray(draftEdgeKey);
     const mergedNodes = [...existingNodes, ...snapshotPreview.addableNodes];
     const mergedEdges = [...existingEdges, ...snapshotPreview.addableEdges];
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedNodes));
-    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(mergedEdges));
+    window.localStorage.setItem(draftNodeKey, JSON.stringify(mergedNodes));
+    window.localStorage.setItem(draftEdgeKey, JSON.stringify(mergedEdges));
 
     appendAuditEvent("DRAFT_SNAPSHOT_IMPORTED", {
       addedNodes: snapshotPreview.addableNodes.length,
@@ -666,6 +688,212 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       `Brainstorm summary:\n${baseline.brainstormSummary || "No summary provided."}`,
       "Generate only baseline-safe requirements from this concept.",
     ].join("\n\n");
+  }
+
+  function normalizeRequirementsPreviewPayload(data) {
+    const normalizeRequirementNodeType = (value) => {
+      const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+      if (normalized === "requirement") {
+        return "Requirement";
+      }
+      if (normalized === "task") {
+        return "Task";
+      }
+      if (normalized === "project") {
+        return "Project";
+      }
+      if (normalized === "risk") {
+        return "Risk";
+      }
+      return "Requirement";
+    };
+    const responseBundle = data?.bundle && typeof data.bundle === "object" ? data.bundle : {};
+    const rawNodes = Array.isArray(data?.proposedNodes)
+      ? data.proposedNodes
+      : Array.isArray(responseBundle.nodes)
+        ? responseBundle.nodes
+        : [];
+    const proposedEdges = Array.isArray(data?.proposedEdges)
+      ? data.proposedEdges
+      : Array.isArray(responseBundle.edges)
+        ? responseBundle.edges
+        : [];
+    const proposedNodes = rawNodes
+      .filter((node) => node && typeof node.id === "string")
+      .map((node) => ({
+        ...node,
+        type: normalizeRequirementNodeType(node.type),
+        stage: "proposed",
+        status: typeof node.status === "string" && node.status ? node.status : "queued",
+        archived: false,
+      }));
+    const titleById = new Map();
+    for (const node of proposedNodes) {
+      if (typeof node?.id === "string") {
+        titleById.set(node.id, typeof node.title === "string" ? node.title : node.id);
+      }
+    }
+
+    return {
+      source: data?.source || "mock",
+      fallbackReason: typeof data?.fallbackReason === "string" ? data.fallbackReason : "",
+      assistantText: typeof data?.assistantText === "string" ? data.assistantText : "",
+      nodes: proposedNodes,
+      edges: proposedEdges,
+      titleById,
+    };
+  }
+
+  function mergeRequirementsDraftProposal(preview) {
+    const draftNodes = loadStoredArray(draftNodeKey);
+    const draftEdges = loadStoredArray(draftEdgeKey);
+    const nodeIds = new Set(draftNodes.map((node) => node?.id).filter((id) => typeof id === "string"));
+    const edgeIds = new Set(draftEdges.map((edge) => edge?.id).filter((id) => typeof id === "string"));
+
+    let addedNodes = 0;
+    let addedEdges = 0;
+    const nextNodes = [...draftNodes];
+    const nextEdges = [...draftEdges];
+
+    for (const node of preview.nodes) {
+      if (!node?.id || nodeIds.has(node.id)) {
+        continue;
+      }
+      nodeIds.add(node.id);
+      nextNodes.push(node);
+      addedNodes += 1;
+    }
+
+    for (const edge of preview.edges) {
+      if (!edge?.id || edgeIds.has(edge.id)) {
+        continue;
+      }
+      edgeIds.add(edge.id);
+      nextEdges.push(edge);
+      addedEdges += 1;
+    }
+
+    window.localStorage.setItem(draftNodeKey, JSON.stringify(nextNodes));
+    window.localStorage.setItem(draftEdgeKey, JSON.stringify(nextEdges));
+
+    return {
+      addedNodes,
+      addedEdges,
+      totalNodes: nextNodes.length,
+      totalEdges: nextEdges.length,
+    };
+  }
+
+  function buildRequirementsChatPrompt(prompt) {
+    const trimmed = typeof prompt === "string" ? prompt.trim() : "";
+    const baselineSummary = latestBaseline?.brainstormSummary || "No baseline summary available.";
+    const experts = loadStoredArray(RECRUITED_EXPERTS_STORAGE_KEY);
+    const expertLines = experts
+      .map((expert) => {
+        const focus = Array.isArray(expert?.focusAreas)
+          ? expert.focusAreas.filter(Boolean).join(", ")
+          : "";
+        return `- ${expert?.title || "Expert"}${focus ? ` (focus: ${focus})` : ""}`;
+      })
+      .join("\n");
+
+    return [
+      `Founder prompt: ${trimmed || "Create requirements"}`,
+      `Baseline summary:\n${baselineSummary}`,
+      expertLines ? `Recruited experts:\n${expertLines}` : "Recruited experts: none",
+      "Generate 5-10 requirement-first proposed nodes and helpful supporting tasks/projects.",
+      "Keep outputs proposed-only and include edges.",
+    ].join("\n\n");
+  }
+
+  async function handleSendRequirementsAi() {
+    const prompt = requirementsChatInput.trim();
+    if (!prompt) {
+      setRequirementsAiError("Enter a requirement prompt before sending.");
+      return;
+    }
+
+    setRequirementsAiLoading(true);
+    setRequirementsAiError("");
+    setRequirementsAiApplyResult("");
+    setRequirementsChatMessages((previous) => [
+      ...previous,
+      { id: `req-chat:founder:${Date.now()}`, role: "founder", text: prompt },
+    ]);
+    setRequirementsChatInput("");
+
+    try {
+      const response = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: buildRequirementsChatPrompt(prompt),
+          mode: "requirements",
+          scope: "requirements",
+          context: {
+            baselineId: latestBaseline?.id || "",
+            draftedRequirementCount: proposedRequirementNodes.length,
+          },
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      const preview = normalizeRequirementsPreviewPayload(data);
+      if (!response.ok || !data?.ok || (!preview.nodes.length && !preview.edges.length)) {
+        throw new Error(data?.error || "Failed to generate requirements AI draft.");
+      }
+      const headerMode = response.headers.get("X-AI-Mode");
+      preview.source = headerMode === "ai" ? "ai" : preview.source;
+      setRequirementsAiPreview(preview);
+      setRequirementsChatMessages((previous) => [
+        ...previous,
+        {
+          id: `req-chat:assistant:${Date.now()}`,
+          role: "assistant",
+          text: preview.assistantText || "Draft prepared. Review and apply to the requirements graph.",
+        },
+      ]);
+
+      appendAuditEvent("ai_generate", {
+        scope: "requirements",
+        source: preview.source,
+        fallbackReason: preview.fallbackReason,
+        nodeCount: preview.nodes.length,
+        edgeCount: preview.edges.length,
+        prompt,
+      });
+    } catch (error) {
+      setRequirementsAiPreview(null);
+      setRequirementsAiError(
+        error instanceof Error ? error.message : "Failed to generate requirements AI draft.",
+      );
+    } finally {
+      setRequirementsAiLoading(false);
+    }
+  }
+
+  function handleApplyRequirementsAi() {
+    if (!requirementsAiPreview) {
+      setRequirementsAiError("Generate a requirements AI draft first.");
+      return;
+    }
+
+    const merged = mergeRequirementsDraftProposal(requirementsAiPreview);
+    setRequirementsAiApplyResult(
+      `Applied requirements AI draft: addedNodes=${merged.addedNodes}, addedEdges=${merged.addedEdges}, totalNodes=${merged.totalNodes}, totalEdges=${merged.totalEdges}`,
+    );
+    setRequirementsAiError("");
+    setRefreshToken((value) => value + 1);
+
+    appendAuditEvent("ai_apply", {
+      scope: "requirements",
+      source: requirementsAiPreview.source || "mock",
+      fallbackReason: requirementsAiPreview.fallbackReason || "",
+      addedNodes: merged.addedNodes,
+      addedEdges: merged.addedEdges,
+      totalNodes: merged.totalNodes,
+      totalEdges: merged.totalEdges,
+    });
   }
 
   async function handleGenerateFromBaseline() {
@@ -731,8 +959,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       return;
     }
 
-    const draftNodes = loadStoredArray(STORAGE_KEY);
-    const draftEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const draftNodes = loadStoredArray(draftNodeKey);
+    const draftEdges = loadStoredArray(draftEdgeKey);
     const nodeIds = new Set(draftNodes.map((node) => node?.id).filter((id) => typeof id === "string"));
     const edgeIds = new Set(draftEdges.map((edge) => edge?.id).filter((id) => typeof id === "string"));
 
@@ -759,8 +987,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       addedEdges += 1;
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextNodes));
-    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(nextEdges));
+    window.localStorage.setItem(draftNodeKey, JSON.stringify(nextNodes));
+    window.localStorage.setItem(draftEdgeKey, JSON.stringify(nextEdges));
 
     appendAuditEvent("REQUIREMENTS_APPLIED_FROM_BASELINE", {
       baselineId: baselinePreview.baselineId,
@@ -976,8 +1204,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       return;
     }
 
-    const draftNodes = loadStoredArray(STORAGE_KEY);
-    const draftEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const draftNodes = loadStoredArray(draftNodeKey);
+    const draftEdges = loadStoredArray(draftEdgeKey);
     const nodeIds = new Set(
       draftNodes.map((item) => item?.id).filter((id) => typeof id === "string"),
     );
@@ -1032,8 +1260,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       addedEdges += 1;
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextNodes));
-    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(nextEdges));
+    window.localStorage.setItem(draftNodeKey, JSON.stringify(nextNodes));
+    window.localStorage.setItem(draftEdgeKey, JSON.stringify(nextEdges));
 
     appendAuditEvent("CHILD_PROPOSALS_APPLIED", {
       parentRequirementId: node.id,
@@ -1128,6 +1356,73 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
 
     return (
       <section>
+        <div>
+          <h3>Requirements AI Chat (Proposed-only)</h3>
+          <div>
+            {requirementsChatMessages.map((entry) => (
+              <p key={entry.id}>
+                <strong>{entry.role === "founder" ? "Founder" : "AI"}:</strong> {entry.text}
+              </p>
+            ))}
+            {requirementsAiLoading ? <p>AI is drafting requirements...</p> : null}
+          </div>
+          <p>
+            <input
+              value={requirementsChatInput}
+              onChange={(event) => setRequirementsChatInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleSendRequirementsAi();
+                }
+              }}
+              placeholder="Create 5 requirements for X"
+            />{" "}
+            <button
+              type="button"
+              onClick={() => void handleSendRequirementsAi()}
+              disabled={requirementsAiLoading || !requirementsChatInput.trim()}
+            >
+              Send
+            </button>{" "}
+            <button
+              type="button"
+              onClick={handleApplyRequirementsAi}
+              disabled={!requirementsAiPreview}
+            >
+              Apply
+            </button>
+          </p>
+          {requirementsAiError ? <p>{requirementsAiError}</p> : null}
+          {requirementsAiApplyResult ? <p>{requirementsAiApplyResult}</p> : null}
+          {requirementsAiPreview ? (
+            <div>
+              {renderAiModeBadge(requirementsAiPreview.source, requirementsAiPreview.fallbackReason)}
+              <p>
+                source={requirementsAiPreview.source}, nodes={requirementsAiPreview.nodes.length},
+                edges={requirementsAiPreview.edges.length}
+              </p>
+              <ul>
+                {requirementsAiPreview.nodes.map((node) => (
+                  <li key={node.id}>
+                    [{node.type}] {node.title}
+                  </li>
+                ))}
+              </ul>
+              <ul>
+                {requirementsAiPreview.edges.map((edge) => {
+                  const fromLabel = requirementsAiPreview.titleById.get(edge.from) || edge.from;
+                  const toLabel = requirementsAiPreview.titleById.get(edge.to) || edge.to;
+                  return (
+                    <li key={edge.id}>
+                      {edge.relationshipType}: {fromLabel} -&gt; {toLabel}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
+        </div>
         <div>
           <h3>Latest Baseline Concept</h3>
           {latestBaseline ? (
@@ -1461,3 +1756,4 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     </section>
   );
 }
+
