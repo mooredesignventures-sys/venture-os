@@ -334,6 +334,11 @@ function createRun() {
     basicRequirementsPreview: null,
     detailedRequirementsPreview: null,
     projectPreview: null,
+    lastSaved: { nodeIds: [], edgeIds: [] },
+    lastSavedStep: null,
+    lastSavedAt: null,
+    lastSavedStorage: "draft",
+    savedAt: null,
     graphSaveStatus: {},
     history: [{ id: `hist:${Date.now()}:created`, createdAt, step: 1, action: "WIZARD_RUN_CREATED" }],
   };
@@ -356,12 +361,21 @@ function withHistory(run, patch) {
   };
 }
 
-function resolveMiniMapData(status) {
-  if (!status || !status.lastSaved || !Array.isArray(status.lastSaved.nodeIds)) {
+function resolveMiniMapData(status, run) {
+  if (!run || run.lastSavedStep !== status?.step) {
     return { nodes: [], edges: [], highlightIds: [] };
   }
 
-  const { nodeKey, edgeKey } = graphKeys(status.storage || "draft");
+  const sourceLastSaved = run.lastSaved;
+  const sourceNodeIds = Array.isArray(sourceLastSaved?.nodeIds) ? sourceLastSaved.nodeIds : [];
+  const sourceEdgeIds = Array.isArray(sourceLastSaved?.edgeIds) ? sourceLastSaved.edgeIds : [];
+
+  if (!sourceNodeIds.length && !sourceEdgeIds.length) {
+    return { nodes: [], edges: [], highlightIds: [] };
+  }
+
+  const storage = run.lastSavedStorage || status?.storage || "draft";
+  const { nodeKey, edgeKey } = graphKeys(storage);
   const allNodes = loadStoredArray(nodeKey);
   const allEdges = loadStoredArray(edgeKey);
   const nodeById = new Map(
@@ -370,11 +384,9 @@ function resolveMiniMapData(status) {
       .map((node) => [node.id, node]),
   );
 
-  const highlightIds = [...status.lastSaved.nodeIds];
+  const highlightIds = [...sourceNodeIds];
   const selectedNodeIds = new Set(highlightIds);
-  const selectedEdgeIds = new Set(
-    Array.isArray(status.lastSaved.edgeIds) ? status.lastSaved.edgeIds : [],
-  );
+  const selectedEdgeIds = new Set(sourceEdgeIds);
 
   for (const nodeId of highlightIds) {
     const node = nodeById.get(nodeId);
@@ -396,20 +408,21 @@ function resolveMiniMapData(status) {
   });
 
   const nodes = [...selectedNodeIds]
+    .sort()
     .map((id) => nodeById.get(id))
     .filter(Boolean);
 
   return { nodes, edges, highlightIds };
 }
 
-function MiniMapReadOnly({ status }) {
-  const { nodes, edges, highlightIds } = resolveMiniMapData(status);
+function MiniMapReadOnly({ run, status }) {
+  const { nodes, edges, highlightIds } = resolveMiniMapData(status, run);
   const highlightSet = new Set(highlightIds);
 
   if (!nodes.length) {
     return (
       <div className="rounded-lg border border-slate-700/70 bg-neutral-900/50 p-2 text-xs text-slate-400">
-        No saved nodes available for mini map.
+        Save to Graph to preview.
       </div>
     );
   }
@@ -427,8 +440,8 @@ function MiniMapReadOnly({ status }) {
   nodes.forEach((node, index) => {
     const col = index % cols;
     const row = Math.floor(index / cols);
-    const x = padX + col * xStep;
-    const y = padY + row * yStep;
+    const x = cols > 1 ? padX + col * xStep : width / 2;
+    const y = rows > 1 ? padY + row * yStep : height / 2;
     posById.set(node.id, { x, y });
   });
 
@@ -462,19 +475,17 @@ function MiniMapReadOnly({ status }) {
           const highlighted = highlightSet.has(node.id);
           return (
             <g key={`${node.id}-${index}`}>
-              <rect
-                x={pos.x - 42}
-                y={pos.y - 16}
-                width="84"
-                height="32"
-                rx="8"
+              <circle
+                cx={pos.x}
+                cy={pos.y}
+                r="14"
                 fill={highlighted ? "rgba(239, 68, 68, 0.25)" : "rgba(30, 41, 59, 0.9)"}
                 stroke={highlighted ? "rgba(251, 191, 36, 0.95)" : "rgba(148, 163, 184, 0.65)"}
                 strokeWidth={highlighted ? "2.4" : "1.2"}
               />
               <text
                 x={pos.x}
-                y={pos.y}
+                y={pos.y + 24}
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill="#e2e8f0"
@@ -505,6 +516,7 @@ export default function WizardClient() {
   const [confirmText, setConfirmText] = useState("");
   const [questionIndex, setQuestionIndex] = useState(0);
   const [answerInput, setAnswerInput] = useState("");
+  const [openMiniMapStep, setOpenMiniMapStep] = useState(null);
 
   function persistRun(nextRun, historyPatch) {
     if (!nextRun) {
@@ -525,32 +537,53 @@ export default function WizardClient() {
     persistRun({ ...run, ...patch }, historyPatch);
   }
 
-  function setStepSaved(step, status, auditType) {
+  function setStepSaved(step, status, auditType, runPatch = null) {
     if (!run) {
       return;
     }
+    const lastSavedAt = nowIso();
+    const lastSaved = {
+      nodeIds: Array.isArray(status?.lastSaved?.nodeIds) ? status.lastSaved.nodeIds : [],
+      edgeIds: Array.isArray(status?.lastSaved?.edgeIds) ? status.lastSaved.edgeIds : [],
+    };
+    const lastSavedCounts = {
+      nodes:
+        status?.lastSavedCounts?.nodes ??
+        (Array.isArray(lastSaved.nodeIds) ? lastSaved.nodeIds.length : 0),
+      edges:
+        status?.lastSavedCounts?.edges ??
+        (Array.isArray(lastSaved.edgeIds) ? lastSaved.edgeIds.length : 0),
+    };
     const graphSaveStatus = {
       ...(run.graphSaveStatus || {}),
       [step]: {
         saved: true,
-        savedAt: nowIso(),
+        savedAt: lastSavedAt,
+        lastSavedAt,
+        step,
+        lastSaved,
+        lastSavedCounts,
         ...status,
       },
     };
 
-    const next = { ...run, graphSaveStatus };
+    const next = {
+      ...run,
+      ...(runPatch || {}),
+      graphSaveStatus,
+      lastSaved,
+      lastSavedStep: step,
+      lastSavedAt,
+      lastSavedStorage: status?.storage || "draft",
+      savedAt: lastSavedAt,
+    };
     persistRun(next, { step, action: auditType });
     appendAuditEvent(auditType, {
       wizardRunId: run.id,
       ...status,
-      lastSavedCounts: {
-        nodes:
-          status?.lastSavedCounts?.nodes ??
-          (Array.isArray(status?.lastSaved?.nodeIds) ? status.lastSaved.nodeIds.length : 0),
-        edges:
-          status?.lastSavedCounts?.edges ??
-          (Array.isArray(status?.lastSaved?.edgeIds) ? status.lastSaved.edgeIds.length : 0),
-      },
+      lastSavedCounts,
+      lastSavedAt,
+      savedAt: lastSavedAt,
     });
     setNotice(`Saved for Step ${step}: ${STEP_TITLES[step]}`);
     setError("");
@@ -560,7 +593,32 @@ export default function WizardClient() {
     const runs = loadStoredArray(WIZARD_RUNS_STORAGE_KEY);
     const active = [...runs].reverse().find((item) => item?.stage === "in_progress");
     if (active) {
-      return active;
+      const normalized = {
+        ...active,
+        lastSaved:
+          active?.lastSaved && Array.isArray(active.lastSaved.nodeIds) && Array.isArray(active.lastSaved.edgeIds)
+            ? active.lastSaved
+            : { nodeIds: [], edgeIds: [] },
+        lastSavedStep: typeof active?.lastSavedStep === "number" ? active.lastSavedStep : null,
+        lastSavedAt:
+          typeof active?.lastSavedAt === "string"
+            ? active.lastSavedAt
+            : typeof active?.savedAt === "string"
+              ? active.savedAt
+              : null,
+      };
+      if (
+        normalized.lastSaved !== active.lastSaved ||
+        normalized.lastSavedStep !== active.lastSavedStep ||
+        normalized.lastSavedAt !== active.lastSavedAt
+      ) {
+        const idx = runs.findIndex((item) => item?.id === active.id);
+        if (idx >= 0) {
+          const nextRuns = runs.map((item, index) => (index === idx ? normalized : item));
+          writeStoredArray(WIZARD_RUNS_STORAGE_KEY, nextRuns);
+        }
+      }
+      return normalized;
     }
     const created = createRun();
     writeStoredArray(WIZARD_RUNS_STORAGE_KEY, [...runs, created]);
@@ -602,6 +660,13 @@ export default function WizardClient() {
     const existing = (run.answers || []).find((item) => item.questionId === question?.questionId);
     setAnswerInput(existing?.answer || "");
   }, [run, questionIndex]);
+
+  useEffect(() => {
+    if (!run || typeof run.lastSavedStep !== "number") {
+      return;
+    }
+    setOpenMiniMapStep(run.lastSavedStep);
+  }, [run?.lastSavedStep, run?.lastSavedAt]);
 
   const canProceed = useMemo(() => {
     if (!run) {
@@ -675,24 +740,14 @@ export default function WizardClient() {
     const additions = run.experts.filter((expert) => !existingIds.has(expert.id));
     const nextExperts = [...existing, ...additions];
     writeStoredArray(RECRUITED_EXPERTS_STORAGE_KEY, nextExperts);
+    const merged = mergeGraph("draft", additions, []);
 
     setStepSaved(1, {
+      ...merged,
       storage: "draft",
-      addedNodes: additions.length,
-      addedEdges: 0,
-      totalNodes: nextExperts.length,
-      totalEdges: 0,
       expertsSavedCount: additions.length,
       totalExperts: nextExperts.length,
       sampleTitles: additions.slice(0, 5).map((item) => item.title),
-      lastSaved: {
-        nodeIds: additions.map((item) => item.id),
-        edgeIds: [],
-      },
-      lastSavedCounts: {
-        nodes: additions.length,
-        edges: 0,
-      },
     }, "WIZARD_EXPERTS_SAVED");
   }
 
@@ -1247,11 +1302,7 @@ export default function WizardClient() {
           },
         },
         "WIZARD_COMMITTED",
-      );
-
-      persistRun(
-        { ...run, stage: "complete" },
-        { step: 7, action: "WIZARD_STAGE_COMPLETE" },
+        { stage: "complete" },
       );
       setConfirmText("");
     } finally {
@@ -1282,46 +1333,53 @@ export default function WizardClient() {
 
   function renderSaveStatus(step) {
     const status = run.graphSaveStatus?.[step];
-    if (!status?.saved) {
-      return (
-        <div className="mt-3 rounded-lg border border-amber-800/60 bg-amber-950/25 p-3 text-xs text-amber-100">
-          Saved to Graph: pending
-        </div>
-      );
-    }
+    const statusWithStep = status ? { ...status, step } : { step };
+    const isSaved = Boolean(status?.saved);
 
     return (
-      <div className="mt-3 rounded-lg border border-emerald-700/60 bg-emerald-900/20 p-3 text-xs text-emerald-100">
-        <div>Saved to Graph: Saved ✓</div>
-        <div>storage={status.storage || "draft"}</div>
+      <div
+        className={`mt-3 rounded-lg border p-3 text-xs ${
+          isSaved
+            ? "border-emerald-700/60 bg-emerald-900/20 text-emerald-100"
+            : "border-amber-800/60 bg-amber-950/25 text-amber-100"
+        }`}
+      >
+        <div>Saved to Graph: {isSaved ? "Saved \u2713" : "pending"}</div>
+        <div>storage={status?.storage || (step === 7 ? "committed" : "draft")}</div>
+        <div>lastSavedAt={status?.lastSavedAt || run.lastSavedAt || "-"}</div>
         <div>
-          addedNodes={status.addedNodes ?? 0}, addedEdges={status.addedEdges ?? 0}, totalNodes=
-          {status.totalNodes ?? 0}, totalEdges={status.totalEdges ?? 0}
+          addedNodes={status?.addedNodes ?? 0}, addedEdges={status?.addedEdges ?? 0}, totalNodes=
+          {status?.totalNodes ?? 0}, totalEdges={status?.totalEdges ?? 0}
         </div>
-        {typeof status.expertsSavedCount === "number" ? (
+        {typeof status?.expertsSavedCount === "number" ? (
           <div>expertsSavedCount={status.expertsSavedCount}, totalExperts={status.totalExperts ?? 0}</div>
         ) : null}
-        {typeof status.committedRequirementCount === "number" ? (
+        {typeof status?.committedRequirementCount === "number" ? (
           <div>
             committedRequirementCount={status.committedRequirementCount}, committedEdgeCount=
             {status.committedEdgeCount ?? 0}, archivedProposedCount={status.archivedProposedCount ?? 0}
           </div>
         ) : null}
-        {Array.isArray(status.sampleTitles) && status.sampleTitles.length > 0 ? (
+        {Array.isArray(status?.sampleTitles) && status.sampleTitles.length > 0 ? (
           <ul className="mt-2 list-disc pl-5">
             {status.sampleTitles.map((title, index) => (
               <li key={`${title}-${index}`}>{title}</li>
             ))}
           </ul>
         ) : null}
-        {step >= 2 ? (
-          <details className="mt-2">
-            <summary className="cursor-pointer text-slate-100">Mini Map (read-only)</summary>
-            <div className="mt-2">
-              <MiniMapReadOnly status={status} />
-            </div>
-          </details>
-        ) : null}
+
+        <details
+          className="mt-2"
+          open={openMiniMapStep === step}
+          onToggle={(event) => {
+            setOpenMiniMapStep(event.currentTarget.open ? step : null);
+          }}
+        >
+          <summary className="cursor-pointer text-slate-100">Mini Map (read-only)</summary>
+          <div className="mt-2">
+            <MiniMapReadOnly run={run} status={statusWithStep} />
+          </div>
+        </details>
       </div>
     );
   }
@@ -1502,3 +1560,4 @@ export default function WizardClient() {
     </>
   );
 }
+
