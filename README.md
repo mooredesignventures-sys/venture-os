@@ -10,11 +10,20 @@
 cd "C:\Users\User\Desktop\Venture OS\venture-os"
 nvm use 22.11.0
 npm install
-npm run dev:safe
+npm run dev:watch
 ```
 
-`dev:safe` prints one line you can copy:
+Recommended local workflow:
+- Start with watchdog: `npm run dev:watch`
+- Print exact URL(s): `npm run dev:url`
+- Prefer `127.0.0.1` over `localhost` when opening pages in browser.
+
+`dev:safe` still prints:
 - `OPEN_URLS login=http://localhost:3000/login app=http://localhost:3000/app`
+
+`dev:url` prints both variants:
+- Preferred: `http://127.0.0.1:3000`
+- Alternate: `http://localhost:3000`
 
 ## Windows Stability
 Why EPERM happens on Windows:
@@ -27,7 +36,8 @@ Why Turbopack can fail intermittently on Windows:
 
 Supported Windows workflow (required):
 - Install/recover: `npm run install:clean`
-- Dev: `npm run dev:safe` (webpack default on Windows)
+- Dev: `npm run dev:watch` (recommended watchdog) or `npm run dev:safe`
+- URL helper: `npm run dev:url` (prints preferred 127.0.0.1 URL)
 - Turbo opt-in only:
   - PowerShell: `$env:VO_TURBO='1'; npm run dev:safe`
   - Direct turbo: `npm run dev:turbo`
