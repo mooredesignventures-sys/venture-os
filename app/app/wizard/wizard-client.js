@@ -116,6 +116,8 @@ function mergeGraph(storage, incomingNodes, incomingEdges) {
   const nextEdges = [...existingEdges];
   let addedNodes = 0;
   let addedEdges = 0;
+  const addedNodeIds = [];
+  const addedEdgeIds = [];
   const sampleTitles = [];
 
   for (const node of Array.isArray(incomingNodes) ? incomingNodes : []) {
@@ -125,6 +127,7 @@ function mergeGraph(storage, incomingNodes, incomingEdges) {
     nodeIds.add(node.id);
     nextNodes.push(node);
     addedNodes += 1;
+    addedNodeIds.push(node.id);
     if (typeof node.title === "string" && node.title && sampleTitles.length < 5) {
       sampleTitles.push(node.title);
     }
@@ -143,6 +146,7 @@ function mergeGraph(storage, incomingNodes, incomingEdges) {
     edgeIds.add(edge.id);
     nextEdges.push(edge);
     addedEdges += 1;
+    addedEdgeIds.push(edge.id);
   }
 
   writeStoredArray(nodeKey, nextNodes);
@@ -155,6 +159,14 @@ function mergeGraph(storage, incomingNodes, incomingEdges) {
     totalEdges: nextEdges.length,
     sampleTitles,
     storage,
+    lastSaved: {
+      nodeIds: addedNodeIds,
+      edgeIds: addedEdgeIds,
+    },
+    lastSavedCounts: {
+      nodes: addedNodes,
+      edges: addedEdges,
+    },
   };
 }
 
@@ -343,6 +355,140 @@ function withHistory(run, patch) {
     ],
   };
 }
+
+function resolveMiniMapData(status) {
+  if (!status || !status.lastSaved || !Array.isArray(status.lastSaved.nodeIds)) {
+    return { nodes: [], edges: [], highlightIds: [] };
+  }
+
+  const { nodeKey, edgeKey } = graphKeys(status.storage || "draft");
+  const allNodes = loadStoredArray(nodeKey);
+  const allEdges = loadStoredArray(edgeKey);
+  const nodeById = new Map(
+    allNodes
+      .filter((node) => node && typeof node.id === "string")
+      .map((node) => [node.id, node]),
+  );
+
+  const highlightIds = [...status.lastSaved.nodeIds];
+  const selectedNodeIds = new Set(highlightIds);
+  const selectedEdgeIds = new Set(
+    Array.isArray(status.lastSaved.edgeIds) ? status.lastSaved.edgeIds : [],
+  );
+
+  for (const nodeId of highlightIds) {
+    const node = nodeById.get(nodeId);
+    if (node && typeof node.parentId === "string" && node.parentId) {
+      selectedNodeIds.add(node.parentId);
+    }
+  }
+
+  const edges = allEdges.filter((edge) => {
+    if (!edge || typeof edge.from !== "string" || typeof edge.to !== "string") {
+      return false;
+    }
+    if (selectedEdgeIds.has(edge.id)) {
+      selectedNodeIds.add(edge.from);
+      selectedNodeIds.add(edge.to);
+      return true;
+    }
+    return selectedNodeIds.has(edge.from) && selectedNodeIds.has(edge.to);
+  });
+
+  const nodes = [...selectedNodeIds]
+    .map((id) => nodeById.get(id))
+    .filter(Boolean);
+
+  return { nodes, edges, highlightIds };
+}
+
+function MiniMapReadOnly({ status }) {
+  const { nodes, edges, highlightIds } = resolveMiniMapData(status);
+  const highlightSet = new Set(highlightIds);
+
+  if (!nodes.length) {
+    return (
+      <div className="rounded-lg border border-slate-700/70 bg-neutral-900/50 p-2 text-xs text-slate-400">
+        No saved nodes available for mini map.
+      </div>
+    );
+  }
+
+  const width = 760;
+  const height = 280;
+  const padX = 80;
+  const padY = 48;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
+  const rows = Math.max(1, Math.ceil(nodes.length / cols));
+  const xStep = cols > 1 ? (width - padX * 2) / (cols - 1) : 0;
+  const yStep = rows > 1 ? (height - padY * 2) / (rows - 1) : 0;
+
+  const posById = new Map();
+  nodes.forEach((node, index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const x = padX + col * xStep;
+    const y = padY + row * yStep;
+    posById.set(node.id, { x, y });
+  });
+
+  return (
+    <div className="rounded-lg border border-slate-700/70 bg-neutral-900/50 p-2">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-64 w-full">
+        {edges.map((edge, index) => {
+          const from = posById.get(edge.from);
+          const to = posById.get(edge.to);
+          if (!from || !to) {
+            return null;
+          }
+          return (
+            <line
+              key={`${edge.id || "edge"}-${index}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="rgba(148, 163, 184, 0.55)"
+              strokeWidth="1.5"
+            />
+          );
+        })}
+
+        {nodes.map((node, index) => {
+          const pos = posById.get(node.id);
+          if (!pos) {
+            return null;
+          }
+          const highlighted = highlightSet.has(node.id);
+          return (
+            <g key={`${node.id}-${index}`}>
+              <rect
+                x={pos.x - 42}
+                y={pos.y - 16}
+                width="84"
+                height="32"
+                rx="8"
+                fill={highlighted ? "rgba(239, 68, 68, 0.25)" : "rgba(30, 41, 59, 0.9)"}
+                stroke={highlighted ? "rgba(251, 191, 36, 0.95)" : "rgba(148, 163, 184, 0.65)"}
+                strokeWidth={highlighted ? "2.4" : "1.2"}
+              />
+              <text
+                x={pos.x}
+                y={pos.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#e2e8f0"
+                fontSize="10"
+              >
+                {String(node.title || node.id).slice(0, 14)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
 export default function WizardClient() {
   const [run, setRun] = useState(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -394,7 +540,18 @@ export default function WizardClient() {
 
     const next = { ...run, graphSaveStatus };
     persistRun(next, { step, action: auditType });
-    appendAuditEvent(auditType, { wizardRunId: run.id, ...status });
+    appendAuditEvent(auditType, {
+      wizardRunId: run.id,
+      ...status,
+      lastSavedCounts: {
+        nodes:
+          status?.lastSavedCounts?.nodes ??
+          (Array.isArray(status?.lastSaved?.nodeIds) ? status.lastSaved.nodeIds.length : 0),
+        edges:
+          status?.lastSavedCounts?.edges ??
+          (Array.isArray(status?.lastSaved?.edgeIds) ? status.lastSaved.edgeIds.length : 0),
+      },
+    });
     setNotice(`Saved for Step ${step}: ${STEP_TITLES[step]}`);
     setError("");
   }
@@ -521,9 +678,21 @@ export default function WizardClient() {
 
     setStepSaved(1, {
       storage: "draft",
+      addedNodes: additions.length,
+      addedEdges: 0,
+      totalNodes: nextExperts.length,
+      totalEdges: 0,
       expertsSavedCount: additions.length,
       totalExperts: nextExperts.length,
       sampleTitles: additions.slice(0, 5).map((item) => item.title),
+      lastSaved: {
+        nodeIds: additions.map((item) => item.id),
+        edgeIds: [],
+      },
+      lastSavedCounts: {
+        nodes: additions.length,
+        edges: 0,
+      },
     }, "WIZARD_EXPERTS_SAVED");
   }
 
@@ -1059,6 +1228,8 @@ export default function WizardClient() {
         7,
         {
           storage: "committed",
+          addedNodes: committedAdds.length,
+          addedEdges: committedEdgeAdds.length,
           committedRequirementCount: committedAdds.length,
           committedEdgeCount: committedEdgeAdds.length,
           archivedProposedCount,
@@ -1066,6 +1237,14 @@ export default function WizardClient() {
           totalNodes: nextCommittedNodes.length,
           totalEdges: nextCommittedEdges.length,
           sampleTitles: committedAdds.slice(0, 5).map((node) => node.title),
+          lastSaved: {
+            nodeIds: committedAdds.map((node) => node.id),
+            edgeIds: committedEdgeAdds.map((edge) => edge.id),
+          },
+          lastSavedCounts: {
+            nodes: committedAdds.length,
+            edges: committedEdgeAdds.length,
+          },
         },
         "WIZARD_COMMITTED",
       );
@@ -1113,7 +1292,7 @@ export default function WizardClient() {
 
     return (
       <div className="mt-3 rounded-lg border border-emerald-700/60 bg-emerald-900/20 p-3 text-xs text-emerald-100">
-        <div>Saved to Graph: Saved ?</div>
+        <div>Saved to Graph: Saved ✓</div>
         <div>storage={status.storage || "draft"}</div>
         <div>
           addedNodes={status.addedNodes ?? 0}, addedEdges={status.addedEdges ?? 0}, totalNodes=
@@ -1134,6 +1313,14 @@ export default function WizardClient() {
               <li key={`${title}-${index}`}>{title}</li>
             ))}
           </ul>
+        ) : null}
+        {step >= 2 ? (
+          <details className="mt-2">
+            <summary className="cursor-pointer text-slate-100">Mini Map (read-only)</summary>
+            <div className="mt-2">
+              <MiniMapReadOnly status={status} />
+            </div>
+          </details>
         ) : null}
       </div>
     );
