@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import EmptyState from "../../../src/components/ui/empty-state";
 import SearchBox from "../../../src/components/ui/search-box";
 import SelectFilter from "../../../src/components/ui/select-filter";
@@ -8,6 +8,7 @@ import SelectFilter from "../../../src/components/ui/select-filter";
 const STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
 const BASELINE_SNAPSHOT_STORAGE_KEY = "baseline_snapshots";
+const RECRUITED_EXPERTS_STORAGE_KEY = "recruited_experts";
 const COMMITTED_NODE_STORAGE_KEY = "committed_nodes";
 const COMMITTED_EDGE_STORAGE_KEY = "committed_edges";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
@@ -241,6 +242,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [baselineLoading, setBaselineLoading] = useState(false);
   const [baselinePreview, setBaselinePreview] = useState(null);
   const [baselineApplyResult, setBaselineApplyResult] = useState("");
+  const [childProposalState, setChildProposalState] = useState({});
   const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
   const committedNodes = useMemo(
     () => getActiveNodes(loadStoredArray(COMMITTED_NODE_STORAGE_KEY)),
@@ -755,6 +757,274 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     setRefreshToken((value) => value + 1);
   }
 
+  function getChildProposalRowState(nodeId) {
+    return childProposalState[nodeId] || {};
+  }
+
+  function updateChildProposalRowState(nodeId, patch) {
+    setChildProposalState((previous) => ({
+      ...previous,
+      [nodeId]: {
+        ...(previous[nodeId] || {}),
+        ...patch,
+      },
+    }));
+  }
+
+  function buildChildProposalPrompt(node) {
+    const recruitedExperts = loadStoredArray(RECRUITED_EXPERTS_STORAGE_KEY);
+    const expertLines = recruitedExperts
+      .map((expert) => {
+        const focus = Array.isArray(expert?.focusAreas)
+          ? expert.focusAreas.filter(Boolean).join(", ")
+          : "";
+        return `- ${expert?.title || "Expert"}${focus ? ` (focus: ${focus})` : ""}`;
+      })
+      .join("\n");
+
+    const baselineSummary = latestBaseline?.brainstormSummary || "No baseline summary available.";
+    const parentTitle = typeof node?.title === "string" ? node.title : "Untitled requirement";
+    const parentRisk = typeof node?.risk === "string" && node.risk ? node.risk : "medium";
+    const parentStatus =
+      typeof node?.status === "string" && node.status ? node.status : "queued";
+    const parentOwner = typeof node?.owner === "string" && node.owner ? node.owner : "founder";
+    const parentVersion = node?.version ?? 1;
+
+    return [
+      "Requirement-driven child proposal drafting task.",
+      `Parent requirement id: ${node.id}`,
+      `Parent requirement title: ${parentTitle}`,
+      `Parent requirement risk: ${parentRisk}`,
+      `Parent requirement status: ${parentStatus}`,
+      `Parent requirement owner: ${parentOwner}`,
+      `Parent requirement version: ${parentVersion}`,
+      `Baseline summary:\n${baselineSummary}`,
+      expertLines ? `Recruited experts:\n${expertLines}` : "Recruited experts: none",
+      "Generate 3-6 child proposals that satisfy this requirement.",
+      "Use node types Project and Task only. Keep all outputs proposed-only.",
+      "Include edges linking child proposals to the parent requirement.",
+    ].join("\n\n");
+  }
+
+  function normalizeChildProposalBundle(bundle, parentNode, nonce) {
+    const parentId = parentNode.id;
+    const rawNodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
+    const rawEdges = Array.isArray(bundle?.edges) ? bundle.edges : [];
+    const parentTitle =
+      typeof parentNode?.title === "string" ? parentNode.title : "Parent Requirement";
+
+    const nodes = rawNodes
+      .filter((node) => node && typeof node.id === "string" && node.id !== parentId)
+      .slice(0, 6)
+      .map((node, index) => {
+        const nextType =
+          node.type === "Project" || node.type === "Task"
+            ? node.type
+            : index === 0
+              ? "Project"
+              : "Task";
+        return {
+          ...node,
+          type: nextType,
+          stage: "proposed",
+          status:
+            typeof node.status === "string" && node.status ? node.status : "queued",
+          archived: false,
+          parentId,
+        };
+      });
+
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const edges = rawEdges
+      .filter(
+        (edge) =>
+          edge &&
+          typeof edge.id === "string" &&
+          typeof edge.from === "string" &&
+          typeof edge.to === "string" &&
+          (nodeIds.has(edge.from) || edge.from === parentId) &&
+          (nodeIds.has(edge.to) || edge.to === parentId),
+      )
+      .map((edge) => ({
+        ...edge,
+        relationshipType:
+          typeof edge.relationshipType === "string" && edge.relationshipType
+            ? edge.relationshipType
+            : "relates_to",
+        stage: "proposed",
+        archived: false,
+      }));
+
+    const parentLinked = new Set(
+      edges
+        .filter((edge) => edge.from && edge.to)
+        .map((edge) => `${edge.from}->${edge.to}`),
+    );
+
+    for (const node of nodes) {
+      const key = `${node.id}->${parentId}`;
+      if (parentLinked.has(key)) {
+        continue;
+      }
+      edges.push({
+        id: `edge:child-parent:${nonce}:${parentId}:${node.id}`,
+        from: node.id,
+        to: parentId,
+        relationshipType: "relates_to",
+        stage: "proposed",
+        createdAt: new Date().toISOString(),
+        createdBy: "ai",
+        archived: false,
+      });
+    }
+
+    const titleById = new Map([[parentId, parentTitle]]);
+    for (const node of nodes) {
+      titleById.set(node.id, node.title || node.id);
+    }
+
+    return { nodes, edges, titleById };
+  }
+
+  async function handleGenerateChildProposals(node) {
+    if (!isEditableProposedRequirement(node)) {
+      return;
+    }
+
+    const nonce = `${Date.now()}`;
+    updateChildProposalRowState(node.id, {
+      loading: true,
+      error: "",
+      result: "",
+    });
+
+    try {
+      const response = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: buildChildProposalPrompt(node),
+          mode: "business",
+          level: "detailed",
+          nonce,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.bundle) {
+        throw new Error(data?.error || "Failed to generate child proposals.");
+      }
+
+      const normalized = normalizeChildProposalBundle(data.bundle, node, nonce);
+      updateChildProposalRowState(node.id, {
+        loading: false,
+        error: "",
+        preview: {
+          source: data.source || "mock",
+          nonce,
+          nodes: normalized.nodes,
+          edges: normalized.edges,
+          titleById: normalized.titleById,
+        },
+      });
+
+      appendAuditEvent("CHILD_PROPOSALS_GENERATED", {
+        parentRequirementId: node.id,
+        parentTitle: node.title,
+        source: data.source || "mock",
+        nodeCount: normalized.nodes.length,
+        edgeCount: normalized.edges.length,
+      });
+    } catch (error) {
+      updateChildProposalRowState(node.id, {
+        loading: false,
+        preview: null,
+        error:
+          error instanceof Error ? error.message : "Failed to generate child proposals.",
+      });
+    }
+  }
+
+  function handleApplyChildProposals(node) {
+    const rowState = getChildProposalRowState(node.id);
+    const preview = rowState.preview;
+    if (!preview) {
+      return;
+    }
+
+    const draftNodes = loadStoredArray(STORAGE_KEY);
+    const draftEdges = loadStoredArray(EDGE_STORAGE_KEY);
+    const nodeIds = new Set(
+      draftNodes.map((item) => item?.id).filter((id) => typeof id === "string"),
+    );
+    const edgeIds = new Set(
+      draftEdges.map((item) => item?.id).filter((id) => typeof id === "string"),
+    );
+
+    let addedNodes = 0;
+    let addedEdges = 0;
+    const nextNodes = [...draftNodes];
+    const nextEdges = [...draftEdges];
+
+    for (const child of preview.nodes) {
+      if (!child?.id || nodeIds.has(child.id)) {
+        continue;
+      }
+      nodeIds.add(child.id);
+      nextNodes.push(child);
+      addedNodes += 1;
+    }
+
+    const edgeCandidates = [...preview.edges];
+    const parentLinked = new Set(
+      edgeCandidates
+        .filter((edge) => typeof edge?.from === "string" && typeof edge?.to === "string")
+        .map((edge) => `${edge.from}->${edge.to}`),
+    );
+    for (const child of preview.nodes) {
+      const parentLinkKey = `${child.id}->${node.id}`;
+      if (parentLinked.has(parentLinkKey)) {
+        continue;
+      }
+      edgeCandidates.push({
+        id: `edge:child-parent:apply:${preview.nonce}:${node.id}:${child.id}`,
+        from: child.id,
+        to: node.id,
+        relationshipType: "relates_to",
+        stage: "proposed",
+        createdAt: new Date().toISOString(),
+        createdBy: "ai",
+        archived: false,
+      });
+      parentLinked.add(parentLinkKey);
+    }
+
+    for (const edge of edgeCandidates) {
+      if (!edge?.id || edgeIds.has(edge.id)) {
+        continue;
+      }
+      edgeIds.add(edge.id);
+      nextEdges.push(edge);
+      addedEdges += 1;
+    }
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextNodes));
+    window.localStorage.setItem(EDGE_STORAGE_KEY, JSON.stringify(nextEdges));
+
+    appendAuditEvent("CHILD_PROPOSALS_APPLIED", {
+      parentRequirementId: node.id,
+      addedNodes,
+      addedEdges,
+      totalNodes: nextNodes.length,
+      totalEdges: nextEdges.length,
+    });
+
+    updateChildProposalRowState(node.id, {
+      result: `Applied proposals: addedNodes=${addedNodes}, addedEdges=${addedEdges}, totalNodes=${nextNodes.length}, totalEdges=${nextEdges.length}`,
+    });
+    setRefreshToken((value) => value + 1);
+  }
+
   function renderTree(nodes) {
     if (nodes.length === 0) {
       return (
@@ -917,54 +1187,104 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
             <tbody>
               {visibleRequirementNodes.map((node) => {
                 const editable = isEditableProposedRequirement(node);
+                const rowState = getChildProposalRowState(node.id);
+                const preview = rowState.preview;
                 return (
-                  <tr key={node.id}>
-                    <td>
-                      <input
-                        value={getRowValue(node, "title")}
-                        disabled={!editable}
-                        onChange={(event) => updateRowEdit(node.id, "title", event.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={getRowValue(node, "risk")}
-                        disabled={!editable}
-                        onChange={(event) => updateRowEdit(node.id, "risk", event.target.value)}
-                      >
-                        {RISK_LEVELS.map((risk) => (
-                          <option key={risk} value={risk}>
-                            {risk}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        value={getRowValue(node, "status")}
-                        disabled={!editable}
-                        onChange={(event) => updateRowEdit(node.id, "status", event.target.value)}
-                      >
-                        {EDITABLE_STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>{node.version ?? "-"}</td>
-                    <td>{node.owner || "-"}</td>
-                    <td>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveProposedRow(node)}
-                        disabled={!editable || !isRowDirty(node)}
-                      >
-                        Save
-                      </button>
-                      {savedNodeId === node.id ? <span> Saved</span> : null}
-                    </td>
-                  </tr>
+                  <Fragment key={node.id}>
+                    <tr>
+                      <td>
+                        <input
+                          value={getRowValue(node, "title")}
+                          disabled={!editable}
+                          onChange={(event) => updateRowEdit(node.id, "title", event.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={getRowValue(node, "risk")}
+                          disabled={!editable}
+                          onChange={(event) => updateRowEdit(node.id, "risk", event.target.value)}
+                        >
+                          {RISK_LEVELS.map((risk) => (
+                            <option key={risk} value={risk}>
+                              {risk}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={getRowValue(node, "status")}
+                          disabled={!editable}
+                          onChange={(event) => updateRowEdit(node.id, "status", event.target.value)}
+                        >
+                          {EDITABLE_STATUSES.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>{node.version ?? "-"}</td>
+                      <td>{node.owner || "-"}</td>
+                      <td>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveProposedRow(node)}
+                          disabled={!editable || !isRowDirty(node)}
+                        >
+                          Save
+                        </button>{" "}
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateChildProposals(node)}
+                          disabled={!editable || rowState.loading}
+                        >
+                          {rowState.loading ? "Generating..." : "Propose Projects"}
+                        </button>
+                        {savedNodeId === node.id ? <span> Saved</span> : null}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6}>
+                        {rowState.error ? <p>{rowState.error}</p> : null}
+                        {preview ? (
+                          <div>
+                            <p>
+                              source={preview.source}, nodeCount={preview.nodes.length}, edgeCount=
+                              {preview.edges.length}
+                            </p>
+                            <ul>
+                              {preview.nodes.map((child) => (
+                                <li key={child.id}>
+                                  [{child.type}] {child.title}
+                                </li>
+                              ))}
+                            </ul>
+                            <ul>
+                              {preview.edges.map((edge) => {
+                                const fromLabel = preview.titleById.get(edge.from) || edge.from;
+                                const toLabel = preview.titleById.get(edge.to) || edge.to;
+                                return (
+                                  <li key={edge.id}>
+                                    {edge.relationshipType}: {fromLabel} -&gt; {toLabel}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                            <button
+                              type="button"
+                              onClick={() => handleApplyChildProposals(node)}
+                              disabled={!preview}
+                            >
+                              Apply Proposals
+                            </button>
+                          </div>
+                        ) : null}
+                        {rowState.result ? <p>{rowState.result}</p> : null}
+                      </td>
+                    </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
