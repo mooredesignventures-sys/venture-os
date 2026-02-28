@@ -11,6 +11,8 @@
     "dev:webpack": "next dev --webpack",
     "dev:turbo": "node -e \"console.error('Turbopack disabled. Use npm run dev:safe'); process.exit(1)\"",
     "dev:safe": "node scripts/dev-safe.mjs",
+    "dev:up": "node scripts/dev-up.mjs",
+    "dev:diag": "powershell -ExecutionPolicy Bypass -File scripts/dev-diagnose.ps1",
     "dev:verify": "node scripts/verify-dev-url.mjs",
     "beta:certify": "node scripts/beta-certify.mjs",
     "check:node": "node scripts/check-node.mjs",
