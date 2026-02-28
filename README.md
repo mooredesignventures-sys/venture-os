@@ -16,6 +16,10 @@ npm run dev:safe
 `dev:safe` prints one line you can copy:
 - `OPEN_URLS login=http://localhost:3000/login app=http://localhost:3000/app`
 
+If you see `ERR_CONNECTION_REFUSED` / "Site can't be reached":
+- Run diagnostics: `npm run dev:diag`
+- Paste the full output when reporting the issue.
+
 ## Windows Stability
 Why EPERM happens on Windows:
 - Native `.node` modules (for example `lightningcss.win32-x64-msvc.node`) can be mapped/locked by active processes.
