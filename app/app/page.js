@@ -32,11 +32,8 @@ export default async function AppPage() {
         >
           <div className="workspace-links">
             <Link href="/app/brainstorm">Brainstorm Engine</Link>
-            <Link href="/app/nodes">Nodes Workspace</Link>
-            <Link href="/app/views">Views Console</Link>
-            <Link href="/app/proposals">Council Proposals</Link>
-            <Link href="/app/audit">Audit Trail</Link>
-            <Link href="/app/tour">Guided Tour</Link>
+            <Link href="/app/views/requirements">Requirements Workspace</Link>
+            <Link href="/app/council">Council (Coming soon)</Link>
           </div>
         </Card>
         <Card title="Route Status" description="Quick links for local checks.">
@@ -50,7 +47,10 @@ export default async function AppPage() {
             <Link href="/app/brainstorm">/app/brainstorm</Link>
           </p>
           <p>
-            <Link href="/app/nodes">/app/nodes</Link>
+            <Link href="/app/views/requirements">/app/views/requirements</Link>
+          </p>
+          <p>
+            <Link href="/app/council">/app/council</Link>
           </p>
         </Card>
         <Card title="Session Control" description="Reset your temporary access session.">

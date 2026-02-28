@@ -42,13 +42,10 @@ export default async function BrainstormPage() {
             <Link href="/app">App area</Link>
           </p>
           <p>
-            <Link href="/app/nodes">Nodes</Link>
+            <Link href="/app/views/requirements">Requirements workspace</Link>
           </p>
           <p>
-            <Link href="/app/views/requirements">Requirements view</Link>
-          </p>
-          <p>
-            <Link href="/app/views/decisions">Decision view</Link>
+            <Link href="/app/council">Council (coming soon)</Link>
           </p>
         </Card>
       </section>
