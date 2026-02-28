@@ -204,6 +204,16 @@ ol {
   gap: 0.9rem;
 }
 
+.app-shell__draft-banner {
+  margin: 0 0 0.9rem;
+  border: 1px dashed rgba(245, 158, 11, 0.46);
+  border-radius: 0.8rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.74rem;
+  color: #e8d4bc;
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .ui-card {
   padding: 0.95rem;
 }
@@ -301,6 +311,50 @@ ol {
 
 .status-badge--committed {
   border-color: rgba(245, 158, 11, 0.8);
+}
+
+.status-badge__hint {
+  margin-top: 0.2rem;
+  font-size: 0.74rem;
+  color: #ffd49f;
+}
+
+.ai-panel {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ai-panel__title {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #ffddb9;
+}
+
+.ai-panel__subtitle {
+  margin: 0.2rem 0 0;
+  font-size: 0.76rem;
+  color: var(--vo-muted);
+}
+
+.ai-panel__messages {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 0.72rem;
+  border: 1px solid rgba(255, 126, 76, 0.22);
+  background: rgba(15, 19, 27, 0.86);
+}
+
+.ai-panel__messages p {
+  margin: 0;
+}
+
+.ai-panel__input {
+  margin: 0;
+}
+
+.ai-panel__actions {
+  margin: 0;
 }
 
 .workspace-grid {

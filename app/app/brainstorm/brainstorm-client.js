@@ -6,8 +6,10 @@
 // Avoid in-place edits unless fixing a bug/regression.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import AiPanel from "../../../src/components/ai-panel";
 import Card, { CardContent } from "../../../src/components/ui/card";
 import EmptyState from "../../../src/components/ui/empty-state";
+import { StageBadge } from "../../../src/components/ui/status-badges";
 
 const DRAFT_NODE_STORAGE_KEY = "draft_nodes";
 const DRAFT_EDGE_STORAGE_KEY = "draft_edges";
@@ -59,43 +61,6 @@ function decisionStateBadge(state) {
     return "border-emerald-700/50 bg-emerald-900/35 text-emerald-200";
   }
   return "border-red-700/50 bg-red-900/35 text-red-200";
-}
-
-function renderAiModeBadge(source, fallbackReason) {
-  const isLive = source === "ai";
-  return (
-    <div className="mt-2 text-[11px]">
-      <span
-        className={`inline-flex rounded-full border px-2 py-0.5 ${
-          isLive
-            ? "border-emerald-600/70 bg-emerald-900/30 text-emerald-200"
-            : "border-amber-600/70 bg-amber-900/30 text-amber-100"
-        }`}
-      >
-        {isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}
-      </span>
-      {!isLive && fallbackReason === "missing_api_key" ? (
-        <div className="mt-1 text-amber-200">Set OPENAI_API_KEY to enable LIVE AI.</div>
-      ) : null}
-    </div>
-  );
-}
-
-function renderLifecycleBadge(stage) {
-  const normalized = typeof stage === "string" ? stage.toLowerCase() : "proposed";
-  const isCommitted = normalized === "committed";
-  return (
-    <span
-      className={classNames(
-        "rounded-md border px-1.5 py-0.5 text-[9px]",
-        isCommitted
-          ? "border-emerald-700/60 bg-emerald-900/30 text-emerald-200"
-          : "border-amber-700/60 bg-amber-900/30 text-amber-100",
-      )}
-    >
-      {isCommitted ? "COMMITTED" : "PROPOSED"}
-    </span>
-  );
 }
 
 function clamp(value, min, max) {
@@ -248,6 +213,13 @@ export default function BrainstormClient() {
   const [draftError, setDraftError] = useState("");
   const [draftResult, setDraftResult] = useState(null);
   const [applyResult, setApplyResult] = useState(null);
+  const [draftConversation, setDraftConversation] = useState(() => [
+    {
+      id: "brainstorm:assistant:init",
+      role: "assistant",
+      text: "Share your idea direction and I will draft proposed brainstorm nodes.",
+    },
+  ]);
   const [baselineResult, setBaselineResult] = useState(null);
   const [auditEvents, setAuditEvents] = useState([]);
   const [recruitedExperts, setRecruitedExperts] = useState([]);
@@ -407,6 +379,10 @@ export default function BrainstormClient() {
     setDraftLoading(true);
     setDraftError("");
     setApplyResult(null);
+    setDraftConversation((previous) => [
+      ...previous,
+      { id: `brainstorm:founder:${Date.now()}`, role: "founder", text: prompt },
+    ]);
 
     try {
       const expertContext =
@@ -435,16 +411,26 @@ export default function BrainstormClient() {
         throw new Error(data?.error || "Failed to generate draft bundle.");
       }
 
+      const nodeCount = Array.isArray(data.bundle.nodes) ? data.bundle.nodes.length : 0;
+      const edgeCount = Array.isArray(data.bundle.edges) ? data.bundle.edges.length : 0;
       const headerMode = response.headers.get("X-AI-Mode");
       const source = headerMode === "ai" ? "ai" : (data.source || "mock");
       const fallbackReason = typeof data?.fallbackReason === "string" ? data.fallbackReason : "";
+      const assistantText =
+        typeof data?.assistantText === "string" && data.assistantText
+          ? data.assistantText
+          : `Prepared draft bundle: nodes=${nodeCount}, edges=${edgeCount}.`;
       setDraftResult({
         ...data,
+        assistantText,
         source,
         fallbackReason,
       });
-      const nodeCount = Array.isArray(data.bundle.nodes) ? data.bundle.nodes.length : 0;
-      const edgeCount = Array.isArray(data.bundle.edges) ? data.bundle.edges.length : 0;
+      setDraftPrompt("");
+      setDraftConversation((previous) => [
+        ...previous,
+        { id: `brainstorm:assistant:${Date.now()}`, role: "assistant", text: assistantText },
+      ]);
       appendAuditEvent(eventType, {
         prompt,
         mode: "requirements",
@@ -731,7 +717,7 @@ export default function BrainstormClient() {
                   <div className="max-w-sm">
                     <EmptyState
                       title="No ideas in map yet"
-                      message="Ask AI to generate ideas."
+                      message="Generate ideas."
                     />
                   </div>
                 </div>
@@ -999,54 +985,44 @@ export default function BrainstormClient() {
 
           <Card className="rounded-2xl border border-red-900/60 bg-neutral-950 shadow-2xl">
             <CardContent>
-              <div className="text-sm font-semibold text-red-400">AI Draft (Proposed-only)</div>
-              <div className="mt-2 text-xs text-slate-400">
-                Generate a proposed draft bundle, preview it, then apply to local draft graph.
-              </div>
-              <div className="mt-1 text-[11px] text-slate-500">
-                AI context includes recruited experts: {recruitedExperts.length}
-              </div>
-
-              <textarea
-                value={draftPrompt}
-                onChange={(event) => setDraftPrompt(event.target.value)}
-                placeholder="Describe the brainstorm direction for requirements draft generation..."
-                className="mt-3 h-24 w-full resize-none rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2 text-sm text-slate-100 outline-none"
+              <AiPanel
+                title="AI Draft (Proposed-only)"
+                subtitle={`Generate a proposed draft bundle, preview it, then apply to local draft graph. AI context includes recruited experts: ${recruitedExperts.length}`}
+                messages={draftConversation}
+                inputValue={draftPrompt}
+                inputPlaceholder="Describe the brainstorm direction for requirements draft generation..."
+                onInputChange={setDraftPrompt}
+                onSend={() => {
+                  void handleGenerateDraft();
+                }}
+                onApply={handleApplyDraft}
+                sendLabel="Generate Draft"
+                applyLabel="Apply to Draft Graph"
+                canSend={Boolean(draftPrompt.trim())}
+                canApply={Boolean(preview)}
+                loading={draftLoading}
+                source={preview?.source || ""}
+                fallbackReason={preview?.fallbackReason || ""}
+                lastProposalSummary={
+                  preview
+                    ? `source=${preview.source} | nodes=${preview.nodes.length} | edges=${preview.edges.length}`
+                    : ""
+                }
+                extraActions={
+                  <p className="ai-panel__actions">
+                    <button
+                      type="button"
+                      onClick={handleRegenerateDraft}
+                      disabled={draftLoading || !draftPrompt.trim()}
+                    >
+                      {draftLoading ? "Regenerating..." : "Regenerate Draft"}
+                    </button>{" "}
+                    <button type="button" onClick={handleCloseBrainstormBaseline}>
+                      Close Brainstorm (Create Baseline)
+                    </button>
+                  </p>
+                }
               />
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleGenerateDraft}
-                  disabled={draftLoading}
-                  className="rounded-xl bg-gradient-to-r from-red-600 to-amber-500 px-4 py-2 text-sm text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {draftLoading ? "Generating..." : "Generate Draft"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRegenerateDraft}
-                  disabled={draftLoading || !draftPrompt.trim()}
-                  className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {draftLoading ? "Regenerating..." : "Regenerate Draft"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApplyDraft}
-                  disabled={!preview}
-                  className="rounded-xl border border-red-900/40 bg-neutral-900 px-4 py-2 text-sm hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Apply to Draft Graph
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCloseBrainstormBaseline}
-                  className="rounded-xl border border-amber-700/50 bg-amber-900/20 px-4 py-2 text-sm text-amber-100 hover:border-amber-400"
-                >
-                  Close Brainstorm (Create Baseline)
-                </button>
-              </div>
 
               {draftError ? (
                 <div className="mt-3 rounded-xl border border-red-700/60 bg-red-900/25 px-3 py-2 text-xs text-red-100">
@@ -1072,7 +1048,6 @@ export default function BrainstormClient() {
               {preview ? (
                 <div className="mt-4 space-y-3 text-xs">
                   <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2 text-slate-200">
-                    {renderAiModeBadge(preview.source, preview.fallbackReason)}
                     <div className="mt-1">
                       source={preview.source} • nodes={preview.nodes.length} • edges=
                       {preview.edges.length}
@@ -1084,7 +1059,7 @@ export default function BrainstormClient() {
                     <div className="mt-2 max-h-32 space-y-1 overflow-auto pr-1 text-slate-300">
                       {preview.nodes.map((node) => (
                         <div key={node.id} className="flex items-center gap-2 truncate">
-                          {renderLifecycleBadge(node.stage || "proposed")}
+                          <StageBadge stage={node.stage || "proposed"} />
                           <span className="truncate">
                             [{node.type}] {node.title}
                           </span>
@@ -1112,7 +1087,7 @@ export default function BrainstormClient() {
                 <div className="mt-4">
                   <EmptyState
                     title="No brainstorm draft yet"
-                    message="Ask AI to generate ideas."
+                    message="Generate ideas."
                   />
                 </div>
               )}

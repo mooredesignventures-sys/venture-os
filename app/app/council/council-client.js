@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import AiPanel from "../../../src/components/ai-panel";
 import Card from "../../../src/components/ui/card";
 import EmptyState from "../../../src/components/ui/empty-state";
+import { StageBadge } from "../../../src/components/ui/status-badges";
 
 const COUNCIL_AVATAR_STORAGE_KEY = "draft_council:avatars";
 const AUDIT_STORAGE_KEY = "draft_audit_log";
@@ -68,18 +70,6 @@ function toIdPart(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-function renderAiModeBadge(source, fallbackReason) {
-  const isLive = source === "ai";
-  return (
-    <div className="text-xs">
-      <span className="status-badge">{isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}</span>
-      {!isLive && fallbackReason === "missing_api_key" ? (
-        <div>Set OPENAI_API_KEY to enable LIVE AI.</div>
-      ) : null}
-    </div>
-  );
 }
 
 function normalizeAvatar(item, index) {
@@ -341,8 +331,8 @@ export default function CouncilClient() {
             <div className="absolute inset-0 flex items-center justify-center p-4">
               <div className="max-w-sm">
                 <EmptyState
-                  title="No avatars yet"
-                  message="Enter a venture idea, then Apply to spawn moving avatars."
+                  title="Council chamber is empty"
+                  message="Recruit your council by sending a venture idea, then Apply."
                 />
               </div>
             </div>
@@ -355,7 +345,7 @@ export default function CouncilClient() {
               >
                 <div className="text-[11px] font-semibold text-slate-100">{avatar.title}</div>
                 <div className="text-[10px] text-slate-400">{avatar.role}</div>
-                <span className="status-badge">PROPOSED</span>
+                <StageBadge stage={avatar.stage || "proposed"} />
               </div>
             ))
           )}
@@ -363,55 +353,49 @@ export default function CouncilClient() {
       </Card>
 
       <Card title="AI Recruiter" description="Generate proposed avatars from your venture idea.">
-        <div className="space-y-2 rounded-xl border border-red-900/30 bg-neutral-950/60 p-3">
-          {messages.map((message) => (
-            <p key={message.id}>
-              <strong>{message.role === "founder" ? "Founder" : "AI"}:</strong> {message.text}
-            </p>
-          ))}
-        </div>
-
-        <p>
-          <textarea
-            value={ventureIdea}
-            onChange={(event) => setVentureIdea(event.target.value)}
-            placeholder="Enter venture idea for council recruiting"
-            className="h-20 w-full"
-          />
-        </p>
-        <p>
-          <button
-            type="button"
-            onClick={() => void handleSend()}
-            disabled={isGenerating || !ventureIdea.trim()}
-          >
-            {isGenerating ? "Sending..." : "Send"}
-          </button>{" "}
-          <button
-            type="button"
-            onClick={handleApply}
-            disabled={!preview || !Array.isArray(preview.proposedAvatars) || preview.proposedAvatars.length === 0}
-          >
-            Apply
-          </button>
-        </p>
-
-        {errorMessage ? <p>{errorMessage}</p> : null}
-        {applyResult ? <p>{applyResult}</p> : null}
-
-        {preview ? (
-          <div>
-            {renderAiModeBadge(preview.source, preview.fallbackReason)}
-            <p>{preview.assistantText}</p>
-            <ul>
-              {preview.proposedAvatars.map((avatar) => (
-                <li key={avatar.id}>
-                  <span className="status-badge">PROPOSED</span> {avatar.title} ({avatar.role})
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        <AiPanel
+          title="Council AI Recruiter"
+          subtitle="Generate proposed avatars from your venture idea."
+          messages={messages}
+          inputValue={ventureIdea}
+          inputPlaceholder="Enter venture idea for council recruiting"
+          onInputChange={setVentureIdea}
+          onSend={() => {
+            void handleSend();
+          }}
+          onApply={handleApply}
+          canSend={Boolean(ventureIdea.trim())}
+          canApply={Boolean(
+            preview &&
+              Array.isArray(preview.proposedAvatars) &&
+              preview.proposedAvatars.length > 0,
+          )}
+          loading={isGenerating}
+          errorMessage={errorMessage}
+          resultMessage={applyResult}
+          source={preview?.source || ""}
+          fallbackReason={preview?.fallbackReason || ""}
+          lastProposalSummary={
+            preview
+              ? `${preview.assistantText} (proposedAvatars=${preview.proposedAvatars.length})`
+              : ""
+          }
+          emptyTitle="Council is empty"
+          emptyMessage="Recruit your council."
+          renderPreview={
+            preview
+              ? () => (
+                  <ul>
+                    {preview.proposedAvatars.map((avatar) => (
+                      <li key={avatar.id}>
+                        <StageBadge stage={avatar.stage || "proposed"} /> {avatar.title} ({avatar.role})
+                      </li>
+                    ))}
+                  </ul>
+                )
+              : null
+          }
+        />
       </Card>
 
       <Card title="Route Links">
