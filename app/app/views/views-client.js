@@ -24,13 +24,23 @@ function renderAiModeBadge(source, fallbackReason) {
   const isLive = source === "ai";
   return (
     <div className="text-xs">
-      <span>
+      <span className="status-badge">
         {isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}
       </span>
       {!isLive && fallbackReason === "missing_api_key" ? (
         <div>Set OPENAI_API_KEY to enable LIVE AI.</div>
       ) : null}
     </div>
+  );
+}
+
+function renderLifecycleBadge(stage) {
+  const normalized = typeof stage === "string" ? stage.toLowerCase() : "proposed";
+  const isCommitted = normalized === "committed";
+  return (
+    <span className={`status-badge${isCommitted ? " status-badge--committed" : ""}`}>
+      {isCommitted ? "COMMITTED" : "PROPOSED"}
+    </span>
   );
 }
 
@@ -1405,7 +1415,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
               <ul>
                 {requirementsAiPreview.nodes.map((node) => (
                   <li key={node.id}>
-                    [{node.type}] {node.title}
+                    {renderLifecycleBadge(node.stage || "proposed")} [{node.type}] {node.title}
                   </li>
                 ))}
               </ul>
@@ -1488,7 +1498,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
             title={`No ${showingProposed ? "proposed" : "committed"} requirements found.`}
             message={
               showingProposed
-                ? "Generate and apply a brainstorm draft to populate this list."
+                ? "Ask AI to generate requirements."
                 : "Commit proposed requirements to populate the committed list."
             }
           />
@@ -1513,6 +1523,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                   <Fragment key={node.id}>
                     <tr>
                       <td>
+                        {renderLifecycleBadge(node.stage || "proposed")}{" "}
                         <input
                           value={getRowValue(node, "title")}
                           disabled={!editable}
@@ -1578,7 +1589,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                             <ul>
                               {preview.nodes.map((child) => (
                                 <li key={child.id}>
-                                  [{child.type}] {child.title}
+                                  {renderLifecycleBadge(child.stage || "proposed")} [{child.type}] {child.title}
                                 </li>
                               ))}
                             </ul>
@@ -1624,7 +1635,9 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
             <tbody>
               {visibleRequirementNodes.map((node) => (
                 <tr key={node.id}>
-                  <td>{node.title}</td>
+                  <td>
+                    {renderLifecycleBadge(node.stage || "committed")} {node.title}
+                  </td>
                   <td>{node.risk || "medium"}</td>
                   <td>{node.status || "queued"}</td>
                   <td>{node.version ?? "-"}</td>

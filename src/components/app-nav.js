@@ -2,18 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-
-const NAV_ITEMS = [
-  { href: "/app/nodes", label: "Nodes" },
-  { href: "/app/views", label: "Views" },
-  { href: "/app/proposals", label: "Proposals" },
-  { href: "/app/brainstorm", label: "Brainstorm" },
-  { href: "/app/wizard", label: "Wizard" },
-  { href: "/app/council", label: "Council" },
-  { href: "/app/audit", label: "Audit" },
-  { href: "/app/nodes#bundle-json", label: "Export" },
-  { href: "/app/tour", label: "Tour" },
-];
+import { NAV_CONFIG } from "../config/nav-config";
 
 const THEME_STORAGE_KEY = "theme";
 
@@ -53,15 +42,32 @@ export default function AppNav({ current }) {
 
   return (
     <nav className="app-nav">
-      {NAV_ITEMS.map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          className={`app-nav__item${current === item.href ? " app-nav__item--active" : ""}`}
-        >
-          {item.label}
-        </Link>
-      ))}
+      {NAV_CONFIG.filter((item) => item.visible).map((item) => {
+        if (!item.enabled) {
+          return (
+            <span
+              key={item.id}
+              className="app-nav__item app-nav__item--disabled"
+              aria-disabled="true"
+            >
+              {item.label}
+              {item.disabledLabel ? (
+                <span className="app-nav__item-meta">{item.disabledLabel}</span>
+              ) : null}
+            </span>
+          );
+        }
+
+        return (
+          <Link
+            key={item.id}
+            href={item.href}
+            className={`app-nav__item${current === item.href ? " app-nav__item--active" : ""}`}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
       <button type="button" className="theme-toggle vo-btn-outline" onClick={handleThemeToggle}>
         Toggle theme
       </button>

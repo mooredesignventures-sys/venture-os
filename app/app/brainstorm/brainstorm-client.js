@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Card, { CardContent } from "../../../src/components/ui/card";
+import EmptyState from "../../../src/components/ui/empty-state";
 
 const DRAFT_NODE_STORAGE_KEY = "draft_nodes";
 const DRAFT_EDGE_STORAGE_KEY = "draft_edges";
@@ -77,6 +78,23 @@ function renderAiModeBadge(source, fallbackReason) {
         <div className="mt-1 text-amber-200">Set OPENAI_API_KEY to enable LIVE AI.</div>
       ) : null}
     </div>
+  );
+}
+
+function renderLifecycleBadge(stage) {
+  const normalized = typeof stage === "string" ? stage.toLowerCase() : "proposed";
+  const isCommitted = normalized === "committed";
+  return (
+    <span
+      className={classNames(
+        "rounded-md border px-1.5 py-0.5 text-[9px]",
+        isCommitted
+          ? "border-emerald-700/60 bg-emerald-900/30 text-emerald-200"
+          : "border-amber-700/60 bg-amber-900/30 text-amber-100",
+      )}
+    >
+      {isCommitted ? "COMMITTED" : "PROPOSED"}
+    </span>
   );
 }
 
@@ -708,33 +726,44 @@ export default function BrainstormClient() {
               />
               <div className="absolute inset-0 bg-gradient-to-br from-black/35 via-transparent to-black/60" />
 
-              {nodes.map((node, index) => (
-                <div
-                  key={node.id}
-                  className="absolute -translate-x-1/2 -translate-y-1/2"
-                  style={{
-                    left: node.x,
-                    top: node.y,
-                    transform: `translate(-50%, -50%) translateZ(${(index % 5) * 4}px)`,
-                  }}
-                >
-                  <div className="w-[220px] rounded-xl border border-red-900/45 bg-neutral-950/90 p-2 shadow-xl">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="truncate text-[11px] font-semibold text-slate-200">
-                        {node.label}
-                      </div>
-                      <span
-                        className={classNames(
-                          "rounded-md border px-1.5 py-0.5 text-[9px]",
-                          clusterPill(node.cluster),
-                        )}
-                      >
-                        {node.cluster}
-                      </span>
-                    </div>
+              {nodes.length === 0 ? (
+                <div className="absolute inset-0 flex items-center justify-center p-4">
+                  <div className="max-w-sm">
+                    <EmptyState
+                      title="No ideas in map yet"
+                      message="Ask AI to generate ideas."
+                    />
                   </div>
                 </div>
-              ))}
+              ) : (
+                nodes.map((node, index) => (
+                  <div
+                    key={node.id}
+                    className="absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                      left: node.x,
+                      top: node.y,
+                      transform: `translate(-50%, -50%) translateZ(${(index % 5) * 4}px)`,
+                    }}
+                  >
+                    <div className="w-[220px] rounded-xl border border-red-900/45 bg-neutral-950/90 p-2 shadow-xl">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="truncate text-[11px] font-semibold text-slate-200">
+                          {node.label}
+                        </div>
+                        <span
+                          className={classNames(
+                            "rounded-md border px-1.5 py-0.5 text-[9px]",
+                            clusterPill(node.cluster),
+                          )}
+                        >
+                          {node.cluster}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1054,8 +1083,11 @@ export default function BrainstormClient() {
                     <div className="font-semibold text-slate-200">Nodes (read-only)</div>
                     <div className="mt-2 max-h-32 space-y-1 overflow-auto pr-1 text-slate-300">
                       {preview.nodes.map((node) => (
-                        <div key={node.id} className="truncate">
-                          [{node.type}] {node.title}
+                        <div key={node.id} className="flex items-center gap-2 truncate">
+                          {renderLifecycleBadge(node.stage || "proposed")}
+                          <span className="truncate">
+                            [{node.type}] {node.title}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -1076,7 +1108,14 @@ export default function BrainstormClient() {
                     </div>
                   </div>
                 </div>
-              ) : null}
+              ) : (
+                <div className="mt-4">
+                  <EmptyState
+                    title="No brainstorm draft yet"
+                    message="Ask AI to generate ideas."
+                  />
+                </div>
+              )}
 
               <div className="mt-4 rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2">
                 <div className="font-semibold text-slate-200">Audit Events (newest first)</div>

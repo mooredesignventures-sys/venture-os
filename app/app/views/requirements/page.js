@@ -28,7 +28,7 @@ export default async function RequirementsViewPage({ searchParams }) {
       description={`Requirement nodes with related items in ${modeLabel} mode.`}
     >
       <Card>
-        <AppNav current="/app/views" />
+        <AppNav current="/app/views/requirements" />
       </Card>
       <Card title="Scope Filter">
         <ViewScopeToggle basePath="/app/views/requirements" scope={scope} />
@@ -38,8 +38,7 @@ export default async function RequirementsViewPage({ searchParams }) {
       </Card>
       <Card>
         <nav>
-          <Link href={`/app/views${scopeQuery}`}>Views</Link> |{" "}
-          <Link href="/app/nodes">Nodes</Link>
+          <Link href={`/app/views${scopeQuery}`}>Views</Link> | <Link href="/app/brainstorm">Brainstorm</Link>
         </nav>
       </Card>
     </AppShell>
