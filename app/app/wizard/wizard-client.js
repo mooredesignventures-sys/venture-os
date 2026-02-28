@@ -1166,7 +1166,7 @@ export default function WizardClient() {
 
             {run.currentStep === 1 ? (
               <section className="mt-4">
-                <h3 className="text-sm font-semibold text-slate-100">Step 1 — Recruit Experts</h3>
+                <h3 className="text-sm font-semibold text-slate-100">Step 1 - Recruit Experts</h3>
                 <textarea
                   value={run.idea}
                   onChange={(event) => setRun((previous) => ({ ...previous, idea: event.target.value }))}
@@ -1194,7 +1194,7 @@ export default function WizardClient() {
 
             {run.currentStep === 2 ? (
               <section className="mt-4">
-                <h3 className="text-sm font-semibold text-slate-100">Step 2 — Brainstorm Q&A</h3>
+                <h3 className="text-sm font-semibold text-slate-100">Step 2 - Brainstorm Q&A</h3>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={handleGenerateQuestions} disabled={qaLoading}>
                     {qaLoading ? "Generating..." : "Generate Questions"}
@@ -1223,7 +1223,7 @@ export default function WizardClient() {
 
             {run.currentStep === 3 ? (
               <section className="mt-4">
-                <h3 className="text-sm font-semibold text-slate-100">Step 3 — Baseline</h3>
+                <h3 className="text-sm font-semibold text-slate-100">Step 3 - Baseline</h3>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => handleGenerateBaseline(false)} disabled={baselineLoading}>{baselineLoading ? "Generating..." : "Generate Baseline"}</button>
                   <button type="button" onClick={() => handleGenerateBaseline(true)} disabled={baselineLoading || !run.baseline}>Revise Baseline</button>
@@ -1241,7 +1241,7 @@ export default function WizardClient() {
 
             {run.currentStep === 4 ? (
               <section className="mt-4">
-                <h3 className="text-sm font-semibold text-slate-100">Step 4 — Basic Requirements</h3>
+                <h3 className="text-sm font-semibold text-slate-100">Step 4 - Basic Requirements</h3>
                 <button type="button" onClick={handleGenerateBasicRequirements} disabled={basicLoading}>{basicLoading ? "Generating..." : "Generate Basic Requirements"}</button>
                 {run.basicRequirementsPreview?.nodes?.length ? (
                   <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
@@ -1255,7 +1255,7 @@ export default function WizardClient() {
 
             {run.currentStep === 5 ? (
               <section className="mt-4">
-                <h3 className="text-sm font-semibold text-slate-100">Step 5 — Expand to Detailed Requirements</h3>
+                <h3 className="text-sm font-semibold text-slate-100">Step 5 - Expand to Detailed Requirements</h3>
                 <button type="button" onClick={handleGenerateDetailedRequirements} disabled={detailedLoading}>{detailedLoading ? "Generating..." : "Generate Detailed Requirements"}</button>
                 {run.detailedRequirementsPreview?.nodes?.length ? (
                   <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
@@ -1269,7 +1269,7 @@ export default function WizardClient() {
 
             {run.currentStep === 6 ? (
               <section className="mt-4">
-                <h3 className="text-sm font-semibold text-slate-100">Step 6 — Propose Projects/Tasks</h3>
+                <h3 className="text-sm font-semibold text-slate-100">Step 6 - Propose Projects/Tasks</h3>
                 <button type="button" onClick={handleGenerateProjects} disabled={projectsLoading}>{projectsLoading ? "Generating..." : "Generate Projects/Tasks"}</button>
                 {run.projectPreview?.nodes?.length ? (
                   <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
@@ -1283,7 +1283,7 @@ export default function WizardClient() {
 
             {run.currentStep === 7 ? (
               <section className="mt-4">
-                <h3 className="text-sm font-semibold text-slate-100">Step 7 — Commit (Founder Only)</h3>
+                <h3 className="text-sm font-semibold text-slate-100">Step 7 - Commit (Founder Only)</h3>
                 <label htmlFor="wizard-confirm-input" className="text-sm text-slate-200">Type CONFIRMED to commit proposed requirements</label>
                 <input
                   id="wizard-confirm-input"
