@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import AiPanel from "../../../src/components/ai-panel";
+import WarCouncilRosterStrip from "../../../src/components/war-council-roster-strip";
 import Card from "../../../src/components/ui/card";
 import EmptyState from "../../../src/components/ui/empty-state";
 import { StageBadge } from "../../../src/components/ui/status-badges";
@@ -305,8 +306,18 @@ export default function CouncilClient() {
     });
   }
 
+  function handleIdeaSaved(ideaText) {
+    appendAuditEvent("war_council_idea_updated", {
+      ideaText: typeof ideaText === "string" ? ideaText : "",
+    });
+  }
+
   return (
     <>
+      <Card title="War Council Roster" description="Call to Arms and persistent core team">
+        <WarCouncilRosterStrip editable onIdeaSaved={handleIdeaSaved} />
+      </Card>
+
       <Card title="Council Canvas" description="Proposed avatars move in the chamber after Apply.">
         <p>
           Active proposed avatars: {totalActive}

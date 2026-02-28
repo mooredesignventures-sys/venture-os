@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import AiPanel from "../../../src/components/ai-panel";
+import WarCouncilRosterStrip from "../../../src/components/war-council-roster-strip";
 import EmptyState from "../../../src/components/ui/empty-state";
 import SearchBox from "../../../src/components/ui/search-box";
 import SelectFilter from "../../../src/components/ui/select-filter";
@@ -1344,6 +1345,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
 
     return (
       <section>
+        <WarCouncilRosterStrip />
+
         <AiPanel
           title="Requirements AI Chat (Proposed-only)"
           subtitle="Send a requirement goal, review proposed output, then Apply to draft requirements."

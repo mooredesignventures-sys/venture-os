@@ -357,6 +357,57 @@ ol {
   margin: 0;
 }
 
+.warcouncil-roster-strip {
+  padding: 0.8rem 0.9rem;
+}
+
+.warcouncil-roster-strip__header {
+  margin-bottom: 0.45rem;
+}
+
+.warcouncil-roster-strip__eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(245, 158, 11, 0.86);
+}
+
+.warcouncil-roster-strip__title {
+  margin: 0.2rem 0 0;
+  font-size: 0.92rem;
+  color: #ffe2c1;
+}
+
+.warcouncil-roster-strip__members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.34rem;
+}
+
+.warcouncil-roster-strip__chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 126, 76, 0.34);
+  border-radius: 999px;
+  padding: 0.24rem 0.52rem;
+  font-size: 0.72rem;
+  background: rgba(17, 22, 30, 0.9);
+}
+
+.warcouncil-roster-strip__editor {
+  margin-top: 0.56rem;
+}
+
+.warcouncil-roster-strip__saved {
+  color: #f0c993;
+  font-size: 0.74rem;
+}
+
+.warcouncil-roster-strip__cta {
+  margin: 0.55rem 0 0;
+}
+
 .workspace-grid {
   display: grid;
   gap: 0.9rem;

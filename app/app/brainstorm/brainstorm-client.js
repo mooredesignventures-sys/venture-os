@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AiPanel from "../../../src/components/ai-panel";
+import WarCouncilRosterStrip from "../../../src/components/war-council-roster-strip";
 import Card, { CardContent } from "../../../src/components/ui/card";
 import EmptyState from "../../../src/components/ui/empty-state";
 import { StageBadge } from "../../../src/components/ui/status-badges";
@@ -839,6 +840,10 @@ export default function BrainstormClient() {
 
   return (
     <div className="space-y-6">
+      <Card title="War Council Roster" description="Shared across Council, Brainstorm, and Requirements">
+        <WarCouncilRosterStrip />
+      </Card>
+
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div>
           <Card className="rounded-2xl border border-red-900/50 bg-neutral-950 shadow-xl">
