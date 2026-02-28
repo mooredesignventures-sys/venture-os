@@ -334,6 +334,12 @@ function createRun() {
     basicRequirementsPreview: null,
     detailedRequirementsPreview: null,
     projectPreview: null,
+    acceptedRequirementIds: [],
+    detailedRequirementPreviewsByParent: {},
+    projectPreviewsByParent: {},
+    detailedSavedParentIds: [],
+    projectSavedParentIds: [],
+    skippedSteps: {},
     lastSaved: { nodeIds: [], edgeIds: [] },
     lastSavedStep: null,
     lastSavedAt: null,
@@ -510,8 +516,8 @@ export default function WizardClient() {
   const [qaLoading, setQaLoading] = useState(false);
   const [baselineLoading, setBaselineLoading] = useState(false);
   const [basicLoading, setBasicLoading] = useState(false);
-  const [detailedLoading, setDetailedLoading] = useState(false);
-  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [detailedLoadingParentId, setDetailedLoadingParentId] = useState("");
+  const [projectsLoadingParentId, setProjectsLoadingParentId] = useState("");
   const [commitLoading, setCommitLoading] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -606,11 +612,36 @@ export default function WizardClient() {
             : typeof active?.savedAt === "string"
               ? active.savedAt
               : null,
+        acceptedRequirementIds: Array.isArray(active?.acceptedRequirementIds)
+          ? active.acceptedRequirementIds.filter((id) => typeof id === "string")
+          : [],
+        detailedRequirementPreviewsByParent:
+          active?.detailedRequirementPreviewsByParent &&
+          typeof active.detailedRequirementPreviewsByParent === "object"
+            ? active.detailedRequirementPreviewsByParent
+            : {},
+        projectPreviewsByParent:
+          active?.projectPreviewsByParent && typeof active.projectPreviewsByParent === "object"
+            ? active.projectPreviewsByParent
+            : {},
+        detailedSavedParentIds: Array.isArray(active?.detailedSavedParentIds)
+          ? active.detailedSavedParentIds.filter((id) => typeof id === "string")
+          : [],
+        projectSavedParentIds: Array.isArray(active?.projectSavedParentIds)
+          ? active.projectSavedParentIds.filter((id) => typeof id === "string")
+          : [],
+        skippedSteps: active?.skippedSteps && typeof active.skippedSteps === "object" ? active.skippedSteps : {},
       };
       if (
         normalized.lastSaved !== active.lastSaved ||
         normalized.lastSavedStep !== active.lastSavedStep ||
-        normalized.lastSavedAt !== active.lastSavedAt
+        normalized.lastSavedAt !== active.lastSavedAt ||
+        normalized.acceptedRequirementIds !== active.acceptedRequirementIds ||
+        normalized.detailedRequirementPreviewsByParent !== active.detailedRequirementPreviewsByParent ||
+        normalized.projectPreviewsByParent !== active.projectPreviewsByParent ||
+        normalized.detailedSavedParentIds !== active.detailedSavedParentIds ||
+        normalized.projectSavedParentIds !== active.projectSavedParentIds ||
+        normalized.skippedSteps !== active.skippedSteps
       ) {
         const idx = runs.findIndex((item) => item?.id === active.id);
         if (idx >= 0) {
@@ -673,6 +704,89 @@ export default function WizardClient() {
       return false;
     }
     return Boolean(run.graphSaveStatus?.[run.currentStep]?.saved);
+  }, [run]);
+
+  const acceptedRequirements = useMemo(() => {
+    const source = Array.isArray(run?.basicRequirementsPreview?.nodes)
+      ? run.basicRequirementsPreview.nodes
+      : [];
+    const acceptedIds = new Set(
+      (Array.isArray(run?.acceptedRequirementIds) ? run.acceptedRequirementIds : []).filter(
+        (id) => typeof id === "string",
+      ),
+    );
+    return source.filter(
+      (node) =>
+        node &&
+        node.type === "Requirement" &&
+        typeof node.id === "string" &&
+        acceptedIds.has(node.id),
+    );
+  }, [run]);
+
+  const acceptedRequirementIdsSet = useMemo(
+    () => new Set(acceptedRequirements.map((node) => node.id)),
+    [acceptedRequirements],
+  );
+
+  const commitScopeSummary = useMemo(() => {
+    const draftNodes = loadStoredArray(DRAFT_NODE_STORAGE_KEY);
+    const draftEdges = loadStoredArray(DRAFT_EDGE_STORAGE_KEY);
+    const acceptedSet = new Set(
+      (Array.isArray(run?.acceptedRequirementIds) ? run.acceptedRequirementIds : []).filter(
+        (id) => typeof id === "string",
+      ),
+    );
+    const acceptedRequirementsInDraft = draftNodes.filter(
+      (node) =>
+        node &&
+        node.type === "Requirement" &&
+        typeof node.id === "string" &&
+        acceptedSet.has(node.id) &&
+        String(node.stage || "").toLowerCase() === "proposed" &&
+        node.archived !== true,
+    );
+    const scopeIds = new Set(acceptedRequirementsInDraft.map((node) => node.id));
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (const node of draftNodes) {
+        if (
+          node &&
+          typeof node.id === "string" &&
+          typeof node.parentId === "string" &&
+          scopeIds.has(node.parentId) &&
+          String(node.stage || "").toLowerCase() === "proposed" &&
+          node.archived !== true &&
+          !scopeIds.has(node.id)
+        ) {
+          scopeIds.add(node.id);
+          expanded = true;
+        }
+      }
+    }
+    const childNodes = draftNodes.filter(
+      (node) =>
+        node &&
+        typeof node.id === "string" &&
+        scopeIds.has(node.id) &&
+        !acceptedSet.has(node.id) &&
+        String(node.stage || "").toLowerCase() === "proposed" &&
+        node.archived !== true,
+    );
+    const relatedEdges = draftEdges.filter(
+      (edge) =>
+        edge &&
+        typeof edge.from === "string" &&
+        typeof edge.to === "string" &&
+        (scopeIds.has(edge.from) || scopeIds.has(edge.to)),
+    );
+
+    return {
+      acceptedRequirementCount: acceptedRequirementsInDraft.length,
+      childNodeCount: childNodes.length,
+      relatedEdgeCount: relatedEdges.length,
+    };
   }, [run]);
 
   if (loadingRun || !run) {
@@ -1054,8 +1168,13 @@ export default function WizardClient() {
       });
       const nodes = buildRequirementPreview(data.bundle.nodes, run.id, "basic");
       const edges = createChainEdges(nodes, run.id, "basic");
+      const autoAccepted = nodes.slice(0, 3).map((node) => node.id);
       persistRun(
-        { ...run, basicRequirementsPreview: { source: data.source || "mock", nodes, edges } },
+        {
+          ...run,
+          basicRequirementsPreview: { source: data.source || "mock", nodes, edges },
+          acceptedRequirementIds: autoAccepted,
+        },
         { step: 4, action: "BASIC_REQUIREMENTS_GENERATED", nodeCount: nodes.length },
       );
       setNotice(`Basic requirements preview ready (${nodes.length}).`);
@@ -1071,69 +1190,243 @@ export default function WizardClient() {
       setError("Generate basic requirements first.");
       return;
     }
+    if (!acceptedRequirements.length) {
+      setError("Accept at least one requirement before saving.");
+      return;
+    }
 
     const merged = mergeGraph(
       "draft",
       run.basicRequirementsPreview.nodes,
       run.basicRequirementsPreview.edges || [],
     );
-    setStepSaved(4, merged, "WIZARD_BASIC_REQS_SAVED");
+    setStepSaved(
+      4,
+      {
+        ...merged,
+        acceptedRequirementCount: acceptedRequirements.length,
+        sampleTitles: acceptedRequirements.slice(0, 5).map((item) => item.title),
+      },
+      "WIZARD_BASIC_REQS_SAVED",
+    );
   }
-  async function handleGenerateDetailedRequirements() {
-    const sourceNodes = run.basicRequirementsPreview?.nodes || [];
-    if (!sourceNodes.length) {
-      setError("Save basic requirements before generating detailed set.");
+  function handleToggleAcceptedRequirement(requirementId) {
+    if (!requirementId) {
+      return;
+    }
+    const current = new Set(
+      (Array.isArray(run.acceptedRequirementIds) ? run.acceptedRequirementIds : []).filter(
+        (id) => typeof id === "string",
+      ),
+    );
+    if (current.has(requirementId)) {
+      current.delete(requirementId);
+    } else {
+      current.add(requirementId);
+    }
+    const acceptedRequirementIds = [...current];
+    persistRun(
+      { ...run, acceptedRequirementIds },
+      { step: 4, action: "BASIC_REQUIREMENT_ACCEPTANCE_UPDATED", acceptedRequirementCount: acceptedRequirementIds.length },
+    );
+  }
+
+  function handleAcceptTopThreeRequirements() {
+    const nodes = Array.isArray(run.basicRequirementsPreview?.nodes)
+      ? run.basicRequirementsPreview.nodes
+      : [];
+    const acceptedRequirementIds = nodes
+      .filter((node) => node?.type === "Requirement" && typeof node?.id === "string")
+      .slice(0, 3)
+      .map((node) => node.id);
+    persistRun(
+      { ...run, acceptedRequirementIds },
+      { step: 4, action: "BASIC_REQUIREMENT_ACCEPTANCE_UPDATED", acceptedRequirementCount: acceptedRequirementIds.length },
+    );
+  }
+
+  function handleClearAcceptedRequirements() {
+    persistRun(
+      { ...run, acceptedRequirementIds: [] },
+      { step: 4, action: "BASIC_REQUIREMENT_ACCEPTANCE_UPDATED", acceptedRequirementCount: 0 },
+    );
+  }
+
+  function handleSkipStep(step) {
+    if (step !== 5 && step !== 6) {
+      return;
+    }
+    const draftNodes = loadStoredArray(DRAFT_NODE_STORAGE_KEY);
+    const draftEdges = loadStoredArray(DRAFT_EDGE_STORAGE_KEY);
+    const skippedSteps = { ...(run.skippedSteps || {}), [step]: true };
+    setStepSaved(
+      step,
+      {
+        storage: "draft",
+        skipped: true,
+        addedNodes: 0,
+        addedEdges: 0,
+        totalNodes: draftNodes.length,
+        totalEdges: draftEdges.length,
+        sampleTitles: [],
+        lastSaved: { nodeIds: [], edgeIds: [] },
+        lastSavedCounts: { nodes: 0, edges: 0 },
+      },
+      "WIZARD_STEP_SKIPPED",
+      { skippedSteps },
+    );
+  }
+
+  async function handleGenerateDetailedRequirements(parentRequirement) {
+    const parent = parentRequirement || null;
+    if (!parent || typeof parent.id !== "string") {
+      setError("Select an accepted requirement first.");
       return;
     }
 
-    setDetailedLoading(true);
+    setDetailedLoadingParentId(parent.id);
     setError("");
     setNotice("");
     try {
+      const expertFocus = (run.experts || [])
+        .flatMap((expert) => (Array.isArray(expert?.focusAreas) ? expert.focusAreas : []))
+        .filter(Boolean)
+        .slice(0, 8)
+        .join(" | ");
+
       const data = await requestDraftBundle({
         mode: "requirements",
         level: "detailed",
         prompt: [
-          "Expand these requirements with more detail:",
-          sourceNodes.slice(0, 6).map((node) => `- ${node.title}`).join("\n"),
+          `Baseline title: ${run.baseline?.title || "Untitled baseline"}`,
+          `Baseline summary:\n${run.baseline?.summary || run.brainstormSummary || "No summary available."}`,
+          `Parent requirement title: ${parent.title || "Untitled requirement"}`,
+          `Parent requirement fields: id=${parent.id}, status=${parent.status || "queued"}, risk=${parent.risk || "medium"}, owner=${parent.owner || "founder"}`,
+          `Recruited experts focus areas: ${expertFocus || "none"}`,
+          "Generate 5-10 detailed requirements/tasks refining this requirement.",
         ].join("\n\n"),
       });
-      const nodes = buildRequirementPreview(data.bundle.nodes, run.id, "detailed", 5, 10);
-      const edges = createChainEdges(nodes, run.id, "detailed");
-      persistRun(
-        { ...run, detailedRequirementsPreview: { source: data.source || "mock", nodes, edges } },
-        { step: 5, action: "DETAILED_REQUIREMENTS_GENERATED", nodeCount: nodes.length },
+
+      const rawNodes = Array.isArray(data.bundle?.nodes) ? data.bundle.nodes : [];
+      const timestamp = Date.now();
+      const mappedNodes = rawNodes
+        .map((node, index) => {
+          const type = node?.type === "Task" ? "Task" : "Requirement";
+          const title = typeof node?.title === "string" && node.title.trim()
+            ? node.title.trim()
+            : `${type} refinement ${index + 1}`;
+          return createNode({
+            id: `wiz:detailed:${toIdPart(run.id)}:${toIdPart(parent.id)}:${timestamp}:${index + 1}`,
+            type,
+            title,
+            parentId: parent.id,
+          });
+        })
+        .slice(0, 10);
+
+      while (mappedNodes.length < 5) {
+        const index = mappedNodes.length + 1;
+        mappedNodes.push(
+          createNode({
+            id: `wiz:detailed:${toIdPart(run.id)}:${toIdPart(parent.id)}:${timestamp}:fallback:${index}`,
+            type: index % 2 === 0 ? "Task" : "Requirement",
+            title: `Requirement refinement ${index} for ${parent.title}`,
+            parentId: parent.id,
+          }),
+        );
+      }
+
+      const edges = mappedNodes.map((node, index) =>
+        createEdge({
+          id: `wiz:detailed-edge:${toIdPart(run.id)}:${toIdPart(parent.id)}:${timestamp}:${index + 1}`,
+          from: node.id,
+          to: parent.id,
+          relationshipType: "relates_to",
+        }),
       );
-      setNotice(`Detailed requirements preview ready (${nodes.length}).`);
+
+      const detailedRequirementPreviewsByParent = {
+        ...(run.detailedRequirementPreviewsByParent || {}),
+        [parent.id]: {
+          source: data.source || "mock",
+          parentRequirementId: parent.id,
+          parentTitle: parent.title,
+          nodes: mappedNodes,
+          edges,
+        },
+      };
+
+      persistRun(
+        { ...run, detailedRequirementPreviewsByParent },
+        { step: 5, action: "DETAILED_REQUIREMENTS_GENERATED", nodeCount: mappedNodes.length, parentRequirementId: parent.id },
+      );
+      setNotice(`Detailed expansion ready for "${parent.title}" (${mappedNodes.length}).`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate detailed requirements.");
     } finally {
-      setDetailedLoading(false);
+      setDetailedLoadingParentId("");
     }
   }
 
-  function handleSaveDetailedRequirements() {
-    if (!run.detailedRequirementsPreview?.nodes?.length) {
+  function handleSaveDetailedRequirements(parentRequirement) {
+    const parent = parentRequirement || null;
+    if (!parent || typeof parent.id !== "string") {
+      setError("Select an accepted requirement first.");
+      return;
+    }
+
+    const preview = run.detailedRequirementPreviewsByParent?.[parent.id];
+    if (!preview?.nodes?.length) {
       setError("Generate detailed requirements first.");
       return;
     }
 
-    const merged = mergeGraph(
-      "draft",
-      run.detailedRequirementsPreview.nodes,
-      run.detailedRequirementsPreview.edges || [],
+    const ensuredEdges = Array.isArray(preview.edges) ? [...preview.edges] : [];
+    const stamp = Date.now();
+    for (let index = 0; index < preview.nodes.length; index += 1) {
+      const node = preview.nodes[index];
+      const hasParentLink = ensuredEdges.some(
+        (edge) =>
+          edge &&
+          ((edge.from === node.id && edge.to === parent.id) ||
+            (edge.to === node.id && edge.from === parent.id)),
+      );
+      if (!hasParentLink) {
+        ensuredEdges.push(
+          createEdge({
+            id: `wiz:detailed-edge:${toIdPart(run.id)}:${toIdPart(parent.id)}:${stamp}:ensure:${index + 1}`,
+            from: node.id,
+            to: parent.id,
+            relationshipType: "relates_to",
+          }),
+        );
+      }
+    }
+
+    const merged = mergeGraph("draft", preview.nodes, ensuredEdges);
+    const detailedSavedParentIds = Array.from(
+      new Set([...(run.detailedSavedParentIds || []), parent.id]),
     );
-    setStepSaved(5, merged, "WIZARD_DETAILED_REQS_SAVED");
+    const skippedSteps = { ...(run.skippedSteps || {}), 5: false };
+    setStepSaved(
+      5,
+      {
+        ...merged,
+        parentRequirementId: parent.id,
+      },
+      "WIZARD_DETAILED_REQS_SAVED",
+      { detailedSavedParentIds, skippedSteps },
+    );
   }
 
-  async function handleGenerateProjects() {
-    const sourceNodes = run.detailedRequirementsPreview?.nodes || run.basicRequirementsPreview?.nodes || [];
-    if (!sourceNodes.length) {
-      setError("Save requirements before generating projects/tasks.");
+  async function handleGenerateProjects(parentRequirement) {
+    const parent = parentRequirement || null;
+    if (!parent || typeof parent.id !== "string") {
+      setError("Select an accepted requirement first.");
       return;
     }
 
-    setProjectsLoading(true);
+    setProjectsLoadingParentId(parent.id);
     setError("");
     setNotice("");
     try {
@@ -1141,15 +1434,16 @@ export default function WizardClient() {
         mode: "business",
         level: "detailed",
         prompt: [
-          "Generate 3-6 child Project/Task proposals for these requirements:",
-          sourceNodes.slice(0, 6).map((node) => `- ${node.title}`).join("\n"),
+          `Baseline summary:\n${run.baseline?.summary || run.brainstormSummary || "No summary available."}`,
+          `Requirement title: ${parent.title || "Untitled requirement"}`,
+          `Requirement details: id=${parent.id}, risk=${parent.risk || "medium"}, status=${parent.status || "queued"}`,
+          "Generate 3-6 Projects/Tasks that satisfy this requirement.",
         ].join("\n\n"),
       });
 
-      const raw = Array.isArray(data.bundle?.nodes) ? data.bundle.nodes : [];
-      const parentRequirement = sourceNodes[0];
-      const parentId = parentRequirement?.id || null;
-      const mappedNodes = raw
+      const rawNodes = Array.isArray(data.bundle?.nodes) ? data.bundle.nodes : [];
+      const timestamp = Date.now();
+      const mappedNodes = rawNodes
         .map((node, index) => {
           const type = node?.type === "Project" || node?.type === "Task"
             ? node.type
@@ -1160,43 +1454,105 @@ export default function WizardClient() {
             ? node.title.trim()
             : `${type} proposal ${index + 1}`;
           return createNode({
-            id: `wiz:project:${toIdPart(run.id)}:${Date.now()}:${index + 1}`,
+            id: `wiz:project:${toIdPart(run.id)}:${toIdPart(parent.id)}:${timestamp}:${index + 1}`,
             type,
             title,
-            parentId,
+            parentId: parent.id,
           });
         })
         .slice(0, 6);
 
+      while (mappedNodes.length < 3) {
+        const index = mappedNodes.length + 1;
+        mappedNodes.push(
+          createNode({
+            id: `wiz:project:${toIdPart(run.id)}:${toIdPart(parent.id)}:${timestamp}:fallback:${index}`,
+            type: index % 2 === 0 ? "Task" : "Project",
+            title: `Project proposal ${index} for ${parent.title}`,
+            parentId: parent.id,
+          }),
+        );
+      }
+
       const edges = mappedNodes.map((node, index) =>
         createEdge({
-          id: `wiz:project-edge:${toIdPart(run.id)}:${Date.now()}:${index + 1}`,
+          id: `wiz:project-edge:${toIdPart(run.id)}:${toIdPart(parent.id)}:${timestamp}:${index + 1}`,
           from: node.id,
-          to: parentId || sourceNodes[0]?.id,
+          to: parent.id,
           relationshipType: "relates_to",
         }),
       );
 
+      const projectPreviewsByParent = {
+        ...(run.projectPreviewsByParent || {}),
+        [parent.id]: {
+          source: data.source || "mock",
+          parentRequirementId: parent.id,
+          parentTitle: parent.title,
+          nodes: mappedNodes,
+          edges,
+        },
+      };
+
       persistRun(
-        { ...run, projectPreview: { source: data.source || "mock", nodes: mappedNodes, edges } },
-        { step: 6, action: "PROJECTS_GENERATED", nodeCount: mappedNodes.length },
+        { ...run, projectPreviewsByParent },
+        { step: 6, action: "PROJECTS_GENERATED", nodeCount: mappedNodes.length, parentRequirementId: parent.id },
       );
-      setNotice(`Project/task preview ready (${mappedNodes.length}).`);
+      setNotice(`Project/task proposals ready for "${parent.title}" (${mappedNodes.length}).`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate projects/tasks.");
     } finally {
-      setProjectsLoading(false);
+      setProjectsLoadingParentId("");
     }
   }
 
-  function handleSaveProjects() {
-    if (!run.projectPreview?.nodes?.length) {
+  function handleSaveProjects(parentRequirement) {
+    const parent = parentRequirement || null;
+    if (!parent || typeof parent.id !== "string") {
+      setError("Select an accepted requirement first.");
+      return;
+    }
+
+    const preview = run.projectPreviewsByParent?.[parent.id];
+    if (!preview?.nodes?.length) {
       setError("Generate project/task proposals first.");
       return;
     }
 
-    const merged = mergeGraph("draft", run.projectPreview.nodes, run.projectPreview.edges || []);
-    setStepSaved(6, merged, "WIZARD_PROJECTS_SAVED");
+    const ensuredEdges = Array.isArray(preview.edges) ? [...preview.edges] : [];
+    const stamp = Date.now();
+    for (let index = 0; index < preview.nodes.length; index += 1) {
+      const node = preview.nodes[index];
+      const hasParentLink = ensuredEdges.some(
+        (edge) =>
+          edge &&
+          ((edge.from === node.id && edge.to === parent.id) ||
+            (edge.to === node.id && edge.from === parent.id)),
+      );
+      if (!hasParentLink) {
+        ensuredEdges.push(
+          createEdge({
+            id: `wiz:project-edge:${toIdPart(run.id)}:${toIdPart(parent.id)}:${stamp}:ensure:${index + 1}`,
+            from: node.id,
+            to: parent.id,
+            relationshipType: "relates_to",
+          }),
+        );
+      }
+    }
+
+    const merged = mergeGraph("draft", preview.nodes, ensuredEdges);
+    const projectSavedParentIds = Array.from(new Set([...(run.projectSavedParentIds || []), parent.id]));
+    const skippedSteps = { ...(run.skippedSteps || {}), 6: false };
+    setStepSaved(
+      6,
+      {
+        ...merged,
+        parentRequirementId: parent.id,
+      },
+      "WIZARD_PROJECTS_SAVED",
+      { projectSavedParentIds, skippedSteps },
+    );
   }
 
   function handleCommit() {
@@ -1215,22 +1571,71 @@ export default function WizardClient() {
       const committedNodes = loadStoredArray(COMMITTED_NODE_STORAGE_KEY);
       const committedEdges = loadStoredArray(COMMITTED_EDGE_STORAGE_KEY);
 
-      const proposedRequirements = draftNodes.filter((node) => {
-        const stage = typeof node?.stage === "string" ? node.stage.toLowerCase() : "";
-        return node?.type === "Requirement" && stage === "proposed" && node?.archived !== true;
-      });
-
-      if (proposedRequirements.length === 0) {
-        setError("No proposed requirements found to commit.");
+      const acceptedRequirementIds = new Set(
+        acceptedRequirements.map((node) => node.id).filter((id) => typeof id === "string"),
+      );
+      if (!acceptedRequirementIds.size) {
+        setError("No accepted requirements selected for commit.");
         setCommitLoading(false);
         return;
       }
 
-      const proposedIds = new Set(proposedRequirements.map((node) => node.id));
+      const proposedAcceptedRequirements = draftNodes.filter((node) => {
+        const stage = typeof node?.stage === "string" ? node.stage.toLowerCase() : "";
+        return (
+          node?.type === "Requirement" &&
+          typeof node?.id === "string" &&
+          acceptedRequirementIds.has(node.id) &&
+          stage === "proposed" &&
+          node?.archived !== true
+        );
+      });
+      if (proposedAcceptedRequirements.length === 0) {
+        setError("Accepted requirements were not found in proposed draft graph.");
+        setCommitLoading(false);
+        return;
+      }
+
+      const scopedNodeIds = new Set(proposedAcceptedRequirements.map((node) => node.id));
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        for (const node of draftNodes) {
+          const stage = typeof node?.stage === "string" ? node.stage.toLowerCase() : "";
+          if (
+            node &&
+            typeof node.id === "string" &&
+            typeof node.parentId === "string" &&
+            scopedNodeIds.has(node.parentId) &&
+            stage === "proposed" &&
+            node.archived !== true &&
+            !scopedNodeIds.has(node.id)
+          ) {
+            scopedNodeIds.add(node.id);
+            expanded = true;
+          }
+        }
+      }
+
+      const scopedProposedNodes = draftNodes.filter(
+        (node) =>
+          node &&
+          typeof node.id === "string" &&
+          scopedNodeIds.has(node.id) &&
+          String(node.stage || "").toLowerCase() === "proposed" &&
+          node.archived !== true,
+      );
+      if (!scopedProposedNodes.length) {
+        setError("No proposed accepted scope found to commit.");
+        setCommitLoading(false);
+        return;
+      }
+
+      const scopedProposedIds = new Set(scopedProposedNodes.map((node) => node.id));
 
       let archivedProposedCount = 0;
       const nextDraftNodes = draftNodes.map((node) => {
-        if (!proposedIds.has(node?.id)) {
+        if (!scopedProposedIds.has(node?.id)) {
           return node;
         }
         archivedProposedCount += 1;
@@ -1240,7 +1645,7 @@ export default function WizardClient() {
       const committedNodeIds = new Set(
         committedNodes.map((node) => node?.id).filter((id) => typeof id === "string"),
       );
-      const committedAdds = proposedRequirements
+      const committedAdds = scopedProposedNodes
         .filter((node) => !committedNodeIds.has(node.id))
         .map((node) => ({ ...node, stage: "committed", archived: false }));
       const nextCommittedNodes = [...committedNodes, ...committedAdds];
@@ -1250,7 +1655,7 @@ export default function WizardClient() {
           edge &&
           typeof edge.from === "string" &&
           typeof edge.to === "string" &&
-          (proposedIds.has(edge.from) || proposedIds.has(edge.to)),
+          (scopedProposedIds.has(edge.from) || scopedProposedIds.has(edge.to)),
       );
 
       const relatedEdgeIds = new Set(
@@ -1274,10 +1679,23 @@ export default function WizardClient() {
         .map((edge) => ({ ...edge, stage: "committed", archived: false }));
       const nextCommittedEdges = [...committedEdges, ...committedEdgeAdds];
 
+      const committedRequirementCount = committedAdds.filter(
+        (node) => node?.type === "Requirement" && acceptedRequirementIds.has(node.id),
+      ).length;
+
       writeStoredArray(DRAFT_NODE_STORAGE_KEY, nextDraftNodes);
       writeStoredArray(DRAFT_EDGE_STORAGE_KEY, nextDraftEdges);
       writeStoredArray(COMMITTED_NODE_STORAGE_KEY, nextCommittedNodes);
       writeStoredArray(COMMITTED_EDGE_STORAGE_KEY, nextCommittedEdges);
+
+      appendAuditEvent("FOUNDER_COMMIT_CONFIRMED", {
+        wizardRunId: run.id,
+        committedRequirementCount,
+        committedEdgeCount: committedEdgeAdds.length,
+        archivedProposedCount,
+        archivedEdgeCount,
+        note: "Committed accepted requirements via exact CONFIRMED",
+      });
 
       setStepSaved(
         7,
@@ -1285,7 +1703,7 @@ export default function WizardClient() {
           storage: "committed",
           addedNodes: committedAdds.length,
           addedEdges: committedEdgeAdds.length,
-          committedRequirementCount: committedAdds.length,
+          committedRequirementCount,
           committedEdgeCount: committedEdgeAdds.length,
           archivedProposedCount,
           archivedEdgeCount,
@@ -1345,6 +1763,7 @@ export default function WizardClient() {
         }`}
       >
         <div>Saved to Graph: {isSaved ? "Saved \u2713" : "pending"}</div>
+        {status?.skipped ? <div>stepStatus=skipped</div> : null}
         <div>storage={status?.storage || (step === 7 ? "committed" : "draft")}</div>
         <div>lastSavedAt={status?.lastSavedAt || run.lastSavedAt || "-"}</div>
         <div>
@@ -1489,11 +1908,42 @@ export default function WizardClient() {
                 <h3 className="text-sm font-semibold text-slate-100">Step 4 - Basic Requirements</h3>
                 <button type="button" onClick={handleGenerateBasicRequirements} disabled={basicLoading}>{basicLoading ? "Generating..." : "Generate Basic Requirements"}</button>
                 {run.basicRequirementsPreview?.nodes?.length ? (
-                  <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
-                    {run.basicRequirementsPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.title}</li>)}
-                  </ul>
+                  <div className="mt-2 rounded-lg border border-slate-700/70 bg-neutral-900/40 p-2 text-sm text-slate-200">
+                    <div className="text-xs text-slate-300">Accepted requirements: {acceptedRequirements.length}</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button type="button" onClick={handleAcceptTopThreeRequirements}>
+                        Accept Top 3
+                      </button>
+                      <button type="button" onClick={handleClearAcceptedRequirements} disabled={!run.acceptedRequirementIds?.length}>
+                        Clear Accepted
+                      </button>
+                    </div>
+                    <ul className="mt-2 space-y-1">
+                      {run.basicRequirementsPreview.nodes.slice(0, 10).map((node) => {
+                        const checked = acceptedRequirementIdsSet.has(node.id);
+                        return (
+                          <li key={node.id} className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={checked}
+                              onChange={() => handleToggleAcceptedRequirement(node.id)}
+                            />
+                            <span>{node.title}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 ) : null}
-                <button type="button" className="mt-2" onClick={handleSaveBasicRequirements} disabled={!run.basicRequirementsPreview?.nodes?.length}>Save Basic Requirements to Draft Graph</button>
+                <button
+                  type="button"
+                  className="mt-2"
+                  onClick={handleSaveBasicRequirements}
+                  disabled={!run.basicRequirementsPreview?.nodes?.length || !acceptedRequirements.length}
+                >
+                  Save Basic Requirements to Draft Graph
+                </button>
                 {renderSaveStatus(4)}
               </section>
             ) : null}
@@ -1501,13 +1951,49 @@ export default function WizardClient() {
             {run.currentStep === 5 ? (
               <section className="mt-4">
                 <h3 className="text-sm font-semibold text-slate-100">Step 5 - Expand to Detailed Requirements</h3>
-                <button type="button" onClick={handleGenerateDetailedRequirements} disabled={detailedLoading}>{detailedLoading ? "Generating..." : "Generate Detailed Requirements"}</button>
-                {run.detailedRequirementsPreview?.nodes?.length ? (
-                  <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
-                    {run.detailedRequirementsPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.title}</li>)}
-                  </ul>
-                ) : null}
-                <button type="button" className="mt-2" onClick={handleSaveDetailedRequirements} disabled={!run.detailedRequirementsPreview?.nodes?.length}>Save Expansion to Draft Graph</button>
+                <p className="mt-1 text-xs text-slate-300">Accepted requirements: {acceptedRequirements.length}</p>
+                <button type="button" className="mt-2" onClick={() => handleSkipStep(5)}>
+                  Skip Step
+                </button>
+                {acceptedRequirements.length ? (
+                  <div className="mt-2 space-y-3">
+                    {acceptedRequirements.map((requirement) => {
+                      const preview = run.detailedRequirementPreviewsByParent?.[requirement.id];
+                      const isLoading = detailedLoadingParentId === requirement.id;
+                      const isSavedForParent = (run.detailedSavedParentIds || []).includes(requirement.id);
+                      return (
+                        <div key={requirement.id} className="rounded-lg border border-slate-700/70 bg-neutral-900/40 p-3">
+                          <div className="text-sm text-slate-100">{requirement.title}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => handleGenerateDetailedRequirements(requirement)} disabled={isLoading}>
+                              {isLoading ? "Generating..." : "Generate Expansion"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSaveDetailedRequirements(requirement)}
+                              disabled={!preview?.nodes?.length}
+                            >
+                              Save Expansion to Draft Graph
+                            </button>
+                          </div>
+                          {preview?.nodes?.length ? (
+                            <div className="mt-2 text-xs text-slate-300">
+                              <div>previewNodes={preview.nodes.length}, previewEdges={(preview.edges || []).length}</div>
+                              <ul className="mt-1 list-disc pl-5">
+                                {preview.nodes.slice(0, 5).map((node) => (
+                                  <li key={node.id}>{node.title}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {isSavedForParent ? <div className="mt-2 text-xs text-emerald-300">Saved for this requirement.</div> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-sm text-amber-200">Accept requirements in Step 4 first.</div>
+                )}
                 {renderSaveStatus(5)}
               </section>
             ) : null}
@@ -1515,13 +2001,45 @@ export default function WizardClient() {
             {run.currentStep === 6 ? (
               <section className="mt-4">
                 <h3 className="text-sm font-semibold text-slate-100">Step 6 - Propose Projects/Tasks</h3>
-                <button type="button" onClick={handleGenerateProjects} disabled={projectsLoading}>{projectsLoading ? "Generating..." : "Generate Projects/Tasks"}</button>
-                {run.projectPreview?.nodes?.length ? (
-                  <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
-                    {run.projectPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.type}: {node.title}</li>)}
-                  </ul>
-                ) : null}
-                <button type="button" className="mt-2" onClick={handleSaveProjects} disabled={!run.projectPreview?.nodes?.length}>Save Proposals to Draft Graph</button>
+                <p className="mt-1 text-xs text-slate-300">Accepted requirements: {acceptedRequirements.length}</p>
+                <button type="button" className="mt-2" onClick={() => handleSkipStep(6)}>
+                  Skip Step
+                </button>
+                {acceptedRequirements.length ? (
+                  <div className="mt-2 space-y-3">
+                    {acceptedRequirements.map((requirement) => {
+                      const preview = run.projectPreviewsByParent?.[requirement.id];
+                      const isLoading = projectsLoadingParentId === requirement.id;
+                      const isSavedForParent = (run.projectSavedParentIds || []).includes(requirement.id);
+                      return (
+                        <div key={requirement.id} className="rounded-lg border border-slate-700/70 bg-neutral-900/40 p-3">
+                          <div className="text-sm text-slate-100">{requirement.title}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => handleGenerateProjects(requirement)} disabled={isLoading}>
+                              {isLoading ? "Generating..." : "Generate Projects"}
+                            </button>
+                            <button type="button" onClick={() => handleSaveProjects(requirement)} disabled={!preview?.nodes?.length}>
+                              Save Projects to Draft Graph
+                            </button>
+                          </div>
+                          {preview?.nodes?.length ? (
+                            <div className="mt-2 text-xs text-slate-300">
+                              <div>previewNodes={preview.nodes.length}, previewEdges={(preview.edges || []).length}</div>
+                              <ul className="mt-1 list-disc pl-5">
+                                {preview.nodes.slice(0, 5).map((node) => (
+                                  <li key={node.id}>{node.type}: {node.title}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {isSavedForParent ? <div className="mt-2 text-xs text-emerald-300">Saved for this requirement.</div> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-sm text-amber-200">Accept requirements in Step 4 first.</div>
+                )}
                 {renderSaveStatus(6)}
               </section>
             ) : null}
@@ -1529,7 +2047,12 @@ export default function WizardClient() {
             {run.currentStep === 7 ? (
               <section className="mt-4">
                 <h3 className="text-sm font-semibold text-slate-100">Step 7 - Commit (Founder Only)</h3>
-                <label htmlFor="wizard-confirm-input" className="text-sm text-slate-200">Type CONFIRMED to commit proposed requirements</label>
+                <div className="mt-2 rounded-lg border border-slate-700/70 bg-neutral-900/40 p-3 text-xs text-slate-200">
+                  <div>acceptedRequirements={commitScopeSummary.acceptedRequirementCount}</div>
+                  <div>generatedChildren={commitScopeSummary.childNodeCount}</div>
+                  <div>relatedEdges={commitScopeSummary.relatedEdgeCount}</div>
+                </div>
+                <label htmlFor="wizard-confirm-input" className="mt-2 block text-sm text-slate-200">Type CONFIRMED to commit accepted requirements</label>
                 <input
                   id="wizard-confirm-input"
                   value={confirmText}
