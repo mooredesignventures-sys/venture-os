@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const ALLOWED_MODES = new Set(["requirements", "decisions", "business"]);
 const ALLOWED_LEVELS = new Set(["baseline", "detailed"]);
-const ALLOWED_SCOPES = new Set(["requirements"]);
+const ALLOWED_SCOPES = new Set(["requirements", "council"]);
 const MOCK_BASE_TIME = Date.UTC(2026, 0, 1, 0, 0, 0);
 const DEFAULT_OWNER = "founder";
 const DEFAULT_RISK = "medium";
@@ -483,6 +483,49 @@ function toScopedPayload(scope, prompt, source, bundle, fallbackReason = "") {
   };
 }
 
+function toCouncilPayload(prompt, source, bundle, fallbackReason = "") {
+  const sourceNodes = Array.isArray(bundle?.nodes) ? bundle.nodes : [];
+  const seen = new Set();
+  const proposedAvatars = [];
+  for (let index = 0; index < sourceNodes.length && proposedAvatars.length < 8; index += 1) {
+    const node = sourceNodes[index];
+    const rawId = coerceString(node?.id);
+    const baseId = `avatar:${toIdPart(rawId || node?.title || `role-${index + 1}`) || `role-${index + 1}`}`;
+    let id = baseId;
+    let dedupe = 2;
+    while (seen.has(id)) {
+      id = `${baseId}:${dedupe}`;
+      dedupe += 1;
+    }
+    seen.add(id);
+    proposedAvatars.push({
+      id,
+      type: "Avatar",
+      title: coerceString(node?.title) || `Council Avatar ${index + 1}`,
+      role: coerceString(node?.type) || "Advisor",
+      stage: "proposed",
+      status: "queued",
+      version: coerceNumber(node?.version, 1),
+      createdAt: coerceString(node?.createdAt) || new Date().toISOString(),
+      createdBy: CREATED_BY,
+      owner: coerceString(node?.owner) || DEFAULT_OWNER,
+      risk: coerceString(node?.risk) || DEFAULT_RISK,
+      parentId: null,
+      archived: false,
+    });
+  }
+
+  const sampleTitles = proposedAvatars.slice(0, 3).map((avatar) => avatar.title);
+  const sampleText = sampleTitles.length ? ` Top roles: ${sampleTitles.join(" | ")}` : "";
+  return {
+    ok: true,
+    source,
+    fallbackReason,
+    assistantText: `AI ${source === "ai" ? "live" : "fallback"} recruited ${proposedAvatars.length} proposed council avatars for "${promptSnippet(prompt)}".${sampleText}`,
+    proposedAvatars,
+  };
+}
+
 async function generateAIBundle(prompt, mode, level = "detailed") {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -654,6 +697,8 @@ export async function POST(request) {
     const payload =
       scope === "requirements"
         ? toScopedPayload(scope, prompt, "mock", bundle, "forced_mock")
+        : scope === "council"
+          ? toCouncilPayload(prompt, "mock", bundle, "forced_mock")
         : {
             ok: true,
             source: "mock",
@@ -671,6 +716,8 @@ export async function POST(request) {
     const payload =
       scope === "requirements"
         ? toScopedPayload(scope, prompt, "mock", bundle, "missing_api_key")
+        : scope === "council"
+          ? toCouncilPayload(prompt, "mock", bundle, "missing_api_key")
         : {
             ok: true,
             source: "mock",
@@ -690,6 +737,8 @@ export async function POST(request) {
       const payload =
         scope === "requirements"
           ? toScopedPayload(scope, prompt, "mock", bundle, "openai_response_invalid")
+          : scope === "council"
+            ? toCouncilPayload(prompt, "mock", bundle, "openai_response_invalid")
           : {
               ok: true,
               source: "mock",
@@ -707,6 +756,8 @@ export async function POST(request) {
     const payload =
       scope === "requirements"
         ? toScopedPayload(scope, prompt, "ai", sanitized)
+        : scope === "council"
+          ? toCouncilPayload(prompt, "ai", sanitized)
         : {
             ok: true,
             source: "ai",
@@ -722,6 +773,8 @@ export async function POST(request) {
     const payload =
       scope === "requirements"
         ? toScopedPayload(scope, prompt, "mock", bundle, fallbackReason)
+        : scope === "council"
+          ? toCouncilPayload(prompt, "mock", bundle, fallbackReason)
         : {
             ok: true,
             source: "mock",
