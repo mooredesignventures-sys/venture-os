@@ -717,7 +717,7 @@ export default function WizardClient() {
       return;
     }
     setOpenMiniMapStep(run.lastSavedStep);
-  }, [run?.lastSavedStep, run?.lastSavedAt]);
+  }, [run]);
 
   const canProceed = useMemo(() => {
     if (!run) {
