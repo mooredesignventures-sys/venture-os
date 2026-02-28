@@ -223,6 +223,42 @@ function readRecruitedExperts() {
   }
 }
 
+function resolveAuditStorageKey() {
+  if (typeof window === "undefined") {
+    return FALLBACK_AUDIT_STORAGE_KEY;
+  }
+
+  const hasPrimary = window.localStorage.getItem(AUDIT_STORAGE_KEY) !== null;
+  if (hasPrimary) {
+    return AUDIT_STORAGE_KEY;
+  }
+
+  const hasFallback = window.localStorage.getItem(FALLBACK_AUDIT_STORAGE_KEY) !== null;
+  if (hasFallback) {
+    return FALLBACK_AUDIT_STORAGE_KEY;
+  }
+
+  return FALLBACK_AUDIT_STORAGE_KEY;
+}
+
+function readAuditEvents() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const key = resolveAuditStorageKey();
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function BrainstormClient() {
   const [message, setMessage] = useState("");
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -301,34 +337,6 @@ export default function BrainstormClient() {
       titleById,
     };
   }, [draftResult]);
-
-  function resolveAuditStorageKey() {
-    const hasPrimary = window.localStorage.getItem(AUDIT_STORAGE_KEY) !== null;
-    if (hasPrimary) {
-      return AUDIT_STORAGE_KEY;
-    }
-
-    const hasFallback = window.localStorage.getItem(FALLBACK_AUDIT_STORAGE_KEY) !== null;
-    if (hasFallback) {
-      return FALLBACK_AUDIT_STORAGE_KEY;
-    }
-
-    return FALLBACK_AUDIT_STORAGE_KEY;
-  }
-
-  function readAuditEvents() {
-    try {
-      const key = resolveAuditStorageKey();
-      const raw = window.localStorage.getItem(key);
-      if (!raw) {
-        return [];
-      }
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
 
   function appendAuditEvent(type, payload) {
     const event = {

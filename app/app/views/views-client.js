@@ -257,12 +257,21 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
   const [baselinePreview, setBaselinePreview] = useState(null);
   const [baselineApplyResult, setBaselineApplyResult] = useState("");
   const [childProposalState, setChildProposalState] = useState({});
-  const activeNodes = useMemo(() => getActiveNodes(loadDraftNodes()), [refreshToken]);
+  const activeNodes = useMemo(() => {
+    void refreshToken;
+    return getActiveNodes(loadDraftNodes());
+  }, [refreshToken]);
   const committedNodes = useMemo(
-    () => getActiveNodes(loadStoredArray(COMMITTED_NODE_STORAGE_KEY)),
+    () => {
+      void refreshToken;
+      return getActiveNodes(loadStoredArray(COMMITTED_NODE_STORAGE_KEY));
+    },
     [refreshToken],
   );
-  const activeEdges = useMemo(() => loadDraftEdges(), [refreshToken]);
+  const activeEdges = useMemo(() => {
+    void refreshToken;
+    return loadDraftEdges();
+  }, [refreshToken]);
   const filteredNodes =
     viewScope === "committed"
       ? activeNodes.filter((node) => normalizeStatus(node) === "committed")
@@ -284,6 +293,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
     return node.type === "Requirement" && stage === "committed" && node.archived !== true;
   });
   const latestBaseline = useMemo(() => {
+    void refreshToken;
     const snapshots = loadStoredArray(BASELINE_SNAPSHOT_STORAGE_KEY).filter((snapshot) => {
       const stage = typeof snapshot?.stage === "string" ? snapshot.stage.toLowerCase() : "";
       return snapshot?.type === "Baseline" && stage === "proposed" && snapshot?.archived !== true;
