@@ -441,46 +441,148 @@ async function generateAIBundle(prompt, mode, level = "detailed") {
     return null;
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "Return only JSON with shape {\"bundle\":{\"nodes\":[],\"edges\":[]}}. Draft bundle only. Do not include committed or archived stages.",
-        },
-        {
-          role: "user",
-          content:
-            level === "baseline"
-              ? `Mode: ${mode}\nLevel: baseline\nPrompt: ${prompt}\nGenerate exactly one Concept node and 5-8 Requirement nodes. Return edges linking concept to requirements and a light requirement chain.`
-              : `Mode: ${mode}\nPrompt: ${prompt}\nGenerate 5-10 nodes and 5-10 edges.`,
-        },
-      ],
-    }),
-  });
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const systemPrompt = [
+    "Return JSON only. No markdown, no prose.",
+    "Return one of these shapes:",
+    '{"bundle":{"nodes":[],"edges":[]}}',
+    '{"nodes":[],"edges":[]}',
+    "All nodes and edges must be proposed-only: stage='proposed', archived=false.",
+    "All node statuses must be 'queued'.",
+    "Generate a small bundle: 3-10 nodes and 3-10 edges.",
+  ].join(" ");
+  const userPrompt =
+    level === "baseline"
+      ? [
+          `Mode: ${mode}`,
+          "Level: baseline",
+          `Prompt: ${prompt}`,
+          "Generate exactly one Concept node and 5-8 Requirement nodes.",
+          "Include edges from concept to requirements and a light requirement chain.",
+        ].join("\n")
+      : [
+          `Mode: ${mode}`,
+          `Prompt: ${prompt}`,
+          "Generate 5-10 nodes and 5-10 edges.",
+        ].join("\n");
 
-  if (!response.ok) {
-    throw new Error(`OpenAI request failed with status ${response.status}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_output_tokens: 900,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json().catch(() => null);
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+
+    const directBundle =
+      data?.bundle && typeof data.bundle === "object"
+        ? data.bundle
+        : Array.isArray(data?.nodes) || Array.isArray(data?.edges)
+          ? data
+          : null;
+    if (directBundle) {
+      return directBundle;
+    }
+
+    const textChunks = [];
+    const topLevelText = coerceString(data?.output_text);
+    if (topLevelText) {
+      textChunks.push(topLevelText);
+    }
+
+    const outputs = Array.isArray(data?.output) ? data.output : [];
+    for (const outputItem of outputs) {
+      if (!outputItem || typeof outputItem !== "object") {
+        continue;
+      }
+
+      const itemText = coerceString(outputItem?.text);
+      if (itemText) {
+        textChunks.push(itemText);
+      }
+
+      const contentItems = Array.isArray(outputItem?.content) ? outputItem.content : [];
+      for (const contentItem of contentItems) {
+        if (!contentItem || typeof contentItem !== "object") {
+          continue;
+        }
+        const contentText =
+          coerceString(contentItem?.text) ||
+          coerceString(contentItem?.output_text) ||
+          coerceString(contentItem?.value);
+        if (contentText) {
+          textChunks.push(contentText);
+        }
+      }
+    }
+
+    const rawText = textChunks.join("\n").trim();
+    if (!rawText) {
+      return null;
+    }
+
+    const tryParse = (value) => {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    };
+
+    const parsed = tryParse(rawText);
+    if (parsed && typeof parsed === "object") {
+      if (parsed?.bundle && typeof parsed.bundle === "object") {
+        return parsed.bundle;
+      }
+      if (Array.isArray(parsed?.nodes) || Array.isArray(parsed?.edges)) {
+        return parsed;
+      }
+    }
+
+    const jsonStart = rawText.indexOf("{");
+    const jsonEnd = rawText.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd <= jsonStart) {
+      return null;
+    }
+
+    const sliced = tryParse(rawText.slice(jsonStart, jsonEnd + 1));
+    if (!sliced || typeof sliced !== "object") {
+      return null;
+    }
+    if (sliced?.bundle && typeof sliced.bundle === "object") {
+      return sliced.bundle;
+    }
+    if (Array.isArray(sliced?.nodes) || Array.isArray(sliced?.edges)) {
+      return sliced;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    throw new Error("OpenAI response did not include JSON content");
-  }
-
-  const parsed = JSON.parse(content);
-  return parsed?.bundle || parsed;
 }
 
 export async function POST(request) {
@@ -516,6 +618,13 @@ export async function POST(request) {
 
   try {
     const aiBundle = await generateAIBundle(prompt, mode, level);
+    if (!aiBundle) {
+      return NextResponse.json({
+        ok: true,
+        source: "mock",
+        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+      });
+    }
     return NextResponse.json({
       ok: true,
       source: "ai",
