@@ -437,10 +437,6 @@ function sanitizeAIBundle(bundle, mode, prompt, level = "detailed", nonce = "") 
 
 async function generateAIBundle(prompt, mode, level = "detailed") {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -483,6 +479,27 @@ async function generateAIBundle(prompt, mode, level = "detailed") {
   return parsed?.bundle || parsed;
 }
 
+function withAiHeaders(payload, aiMode, fallbackReason = "", fallbackFromFailure = false) {
+  const headers = {
+    "X-AI-Mode": aiMode,
+  };
+  if (aiMode === "mock" && fallbackFromFailure && fallbackReason) {
+    headers["X-AI-Fallback-Reason"] = fallbackReason;
+  }
+  return NextResponse.json(payload, { headers });
+}
+
+function classifyFallbackReason(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/status\s+\d+/i.test(message)) {
+    return "openai_request_failed";
+  }
+  if (/json/i.test(message) || /content/i.test(message)) {
+    return "openai_response_invalid";
+  }
+  return "openai_runtime_error";
+}
+
 export async function POST(request) {
   let body;
   try {
@@ -506,26 +523,65 @@ export async function POST(request) {
   const level = normalizeLevel(body?.level);
   const nonce = normalizeNonce(body?.nonce);
 
+  if (process.env.VOS_FORCE_MOCK === "true") {
+    return withAiHeaders(
+      {
+        ok: true,
+        source: "mock",
+        fallbackReason: "forced_mock",
+        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+      },
+      "mock",
+    );
+  }
+
   if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({
-      ok: true,
-      source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-    });
+    return withAiHeaders(
+      {
+        ok: true,
+        source: "mock",
+        fallbackReason: "missing_api_key",
+        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+      },
+      "mock",
+    );
   }
 
   try {
     const aiBundle = await generateAIBundle(prompt, mode, level);
-    return NextResponse.json({
-      ok: true,
-      source: "ai",
-      bundle: sanitizeAIBundle(aiBundle, mode, prompt, level, nonce),
-    });
-  } catch {
-    return NextResponse.json({
-      ok: true,
-      source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-    });
+    if (!aiBundle || typeof aiBundle !== "object") {
+      return withAiHeaders(
+        {
+          ok: true,
+          source: "mock",
+          fallbackReason: "openai_response_invalid",
+          bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+        },
+        "mock",
+        "openai_response_invalid",
+        true,
+      );
+    }
+    return withAiHeaders(
+      {
+        ok: true,
+        source: "ai",
+        bundle: sanitizeAIBundle(aiBundle, mode, prompt, level, nonce),
+      },
+      "ai",
+    );
+  } catch (error) {
+    const fallbackReason = classifyFallbackReason(error);
+    return withAiHeaders(
+      {
+        ok: true,
+        source: "mock",
+        fallbackReason,
+        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+      },
+      "mock",
+      fallbackReason,
+      true,
+    );
   }
 }

@@ -26,6 +26,26 @@ const STEP_TITLES = {
   7: "Commit",
 };
 
+function renderAiModeBadge(source, fallbackReason) {
+  const isLive = source === "ai";
+  return (
+    <div className="text-[11px]">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 ${
+          isLive
+            ? "border-emerald-600/70 bg-emerald-900/30 text-emerald-200"
+            : "border-amber-600/70 bg-amber-900/30 text-amber-100"
+        }`}
+      >
+        {isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}
+      </span>
+      {!isLive && fallbackReason === "missing_api_key" ? (
+        <div className="mt-1 text-amber-200">Set OPENAI_API_KEY to enable LIVE AI.</div>
+      ) : null}
+    </div>
+  );
+}
+
 function loadStoredArray(key) {
   if (typeof window === "undefined") {
     return [];
@@ -693,7 +713,14 @@ export default function WizardClient() {
     if (!response.ok || !data?.ok || !data?.bundle) {
       throw new Error(data?.error || "Draft generation failed.");
     }
-    return data;
+    const headerMode = response.headers.get("X-AI-Mode");
+    const source = headerMode === "ai" ? "ai" : (data.source || "mock");
+    const fallbackReason = typeof data?.fallbackReason === "string" ? data.fallbackReason : "";
+    return {
+      ...data,
+      source,
+      fallbackReason,
+    };
   }
 
   async function handleRecruitExperts() {
@@ -1055,7 +1082,15 @@ export default function WizardClient() {
       const nodes = buildRequirementPreview(data.bundle.nodes, run.id, "basic");
       const edges = createChainEdges(nodes, run.id, "basic");
       persistRun(
-        { ...run, basicRequirementsPreview: { source: data.source || "mock", nodes, edges } },
+        {
+          ...run,
+          basicRequirementsPreview: {
+            source: data.source || "mock",
+            fallbackReason: data.fallbackReason || "",
+            nodes,
+            edges,
+          },
+        },
         { step: 4, action: "BASIC_REQUIREMENTS_GENERATED", nodeCount: nodes.length },
       );
       setNotice(`Basic requirements preview ready (${nodes.length}).`);
@@ -1101,7 +1136,15 @@ export default function WizardClient() {
       const nodes = buildRequirementPreview(data.bundle.nodes, run.id, "detailed", 5, 10);
       const edges = createChainEdges(nodes, run.id, "detailed");
       persistRun(
-        { ...run, detailedRequirementsPreview: { source: data.source || "mock", nodes, edges } },
+        {
+          ...run,
+          detailedRequirementsPreview: {
+            source: data.source || "mock",
+            fallbackReason: data.fallbackReason || "",
+            nodes,
+            edges,
+          },
+        },
         { step: 5, action: "DETAILED_REQUIREMENTS_GENERATED", nodeCount: nodes.length },
       );
       setNotice(`Detailed requirements preview ready (${nodes.length}).`);
@@ -1178,7 +1221,15 @@ export default function WizardClient() {
       );
 
       persistRun(
-        { ...run, projectPreview: { source: data.source || "mock", nodes: mappedNodes, edges } },
+        {
+          ...run,
+          projectPreview: {
+            source: data.source || "mock",
+            fallbackReason: data.fallbackReason || "",
+            nodes: mappedNodes,
+            edges,
+          },
+        },
         { step: 6, action: "PROJECTS_GENERATED", nodeCount: mappedNodes.length },
       );
       setNotice(`Project/task preview ready (${mappedNodes.length}).`);
@@ -1489,9 +1540,15 @@ export default function WizardClient() {
                 <h3 className="text-sm font-semibold text-slate-100">Step 4 - Basic Requirements</h3>
                 <button type="button" onClick={handleGenerateBasicRequirements} disabled={basicLoading}>{basicLoading ? "Generating..." : "Generate Basic Requirements"}</button>
                 {run.basicRequirementsPreview?.nodes?.length ? (
-                  <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
-                    {run.basicRequirementsPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.title}</li>)}
-                  </ul>
+                  <div className="mt-2 rounded-lg border border-slate-700/70 bg-neutral-900/40 p-2">
+                    {renderAiModeBadge(
+                      run.basicRequirementsPreview.source || "mock",
+                      run.basicRequirementsPreview.fallbackReason || "",
+                    )}
+                    <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
+                      {run.basicRequirementsPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.title}</li>)}
+                    </ul>
+                  </div>
                 ) : null}
                 <button type="button" className="mt-2" onClick={handleSaveBasicRequirements} disabled={!run.basicRequirementsPreview?.nodes?.length}>Save Basic Requirements to Draft Graph</button>
                 {renderSaveStatus(4)}
@@ -1503,9 +1560,15 @@ export default function WizardClient() {
                 <h3 className="text-sm font-semibold text-slate-100">Step 5 - Expand to Detailed Requirements</h3>
                 <button type="button" onClick={handleGenerateDetailedRequirements} disabled={detailedLoading}>{detailedLoading ? "Generating..." : "Generate Detailed Requirements"}</button>
                 {run.detailedRequirementsPreview?.nodes?.length ? (
-                  <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
-                    {run.detailedRequirementsPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.title}</li>)}
-                  </ul>
+                  <div className="mt-2 rounded-lg border border-slate-700/70 bg-neutral-900/40 p-2">
+                    {renderAiModeBadge(
+                      run.detailedRequirementsPreview.source || "mock",
+                      run.detailedRequirementsPreview.fallbackReason || "",
+                    )}
+                    <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
+                      {run.detailedRequirementsPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.title}</li>)}
+                    </ul>
+                  </div>
                 ) : null}
                 <button type="button" className="mt-2" onClick={handleSaveDetailedRequirements} disabled={!run.detailedRequirementsPreview?.nodes?.length}>Save Expansion to Draft Graph</button>
                 {renderSaveStatus(5)}
@@ -1517,9 +1580,15 @@ export default function WizardClient() {
                 <h3 className="text-sm font-semibold text-slate-100">Step 6 - Propose Projects/Tasks</h3>
                 <button type="button" onClick={handleGenerateProjects} disabled={projectsLoading}>{projectsLoading ? "Generating..." : "Generate Projects/Tasks"}</button>
                 {run.projectPreview?.nodes?.length ? (
-                  <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
-                    {run.projectPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.type}: {node.title}</li>)}
-                  </ul>
+                  <div className="mt-2 rounded-lg border border-slate-700/70 bg-neutral-900/40 p-2">
+                    {renderAiModeBadge(
+                      run.projectPreview.source || "mock",
+                      run.projectPreview.fallbackReason || "",
+                    )}
+                    <ul className="mt-2 list-disc pl-5 text-sm text-slate-200">
+                      {run.projectPreview.nodes.slice(0, 10).map((node) => <li key={node.id}>{node.type}: {node.title}</li>)}
+                    </ul>
+                  </div>
                 ) : null}
                 <button type="button" className="mt-2" onClick={handleSaveProjects} disabled={!run.projectPreview?.nodes?.length}>Save Proposals to Draft Graph</button>
                 {renderSaveStatus(6)}

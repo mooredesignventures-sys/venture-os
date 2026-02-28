@@ -18,6 +18,20 @@ const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 const RISK_LEVELS = ["low", "medium", "high"];
 const EDITABLE_STATUSES = ["queued", "in_progress", "review", "complete"];
 
+function renderAiModeBadge(source, fallbackReason) {
+  const isLive = source === "ai";
+  return (
+    <div className="text-xs">
+      <span>
+        {isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}
+      </span>
+      {!isLive && fallbackReason === "missing_api_key" ? (
+        <div>Set OPENAI_API_KEY to enable LIVE AI.</div>
+      ) : null}
+    </div>
+  );
+}
+
 function normalizeRelationships(node) {
   if (Array.isArray(node.relationships)) {
     return node.relationships
@@ -679,19 +693,24 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       if (!response.ok || !data?.ok || !data?.bundle) {
         throw new Error(data?.error || "Failed to generate requirements from baseline.");
       }
+      const headerMode = response.headers.get("X-AI-Mode");
+      const source = headerMode === "ai" ? "ai" : (data.source || "mock");
+      const fallbackReason = typeof data?.fallbackReason === "string" ? data.fallbackReason : "";
 
       const nodes = Array.isArray(data.bundle.nodes) ? data.bundle.nodes : [];
       const edges = Array.isArray(data.bundle.edges) ? data.bundle.edges : [];
       setBaselinePreview({
         baselineId: latestBaseline.id,
-        source: data.source || "mock",
+        source,
+        fallbackReason,
         nodes,
         edges,
       });
 
       appendAuditEvent("REQUIREMENTS_GENERATED_FROM_BASELINE", {
         baselineId: latestBaseline.id,
-        source: data.source || "mock",
+        source,
+        fallbackReason,
         nodeCount: nodes.length,
         edgeCount: edges.length,
       });
@@ -914,13 +933,17 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       if (!response.ok || !data?.ok || !data?.bundle) {
         throw new Error(data?.error || "Failed to generate child proposals.");
       }
+      const headerMode = response.headers.get("X-AI-Mode");
+      const source = headerMode === "ai" ? "ai" : (data.source || "mock");
+      const fallbackReason = typeof data?.fallbackReason === "string" ? data.fallbackReason : "";
 
       const normalized = normalizeChildProposalBundle(data.bundle, node, nonce);
       updateChildProposalRowState(node.id, {
         loading: false,
         error: "",
         preview: {
-          source: data.source || "mock",
+          source,
+          fallbackReason,
           nonce,
           nodes: normalized.nodes,
           edges: normalized.edges,
@@ -931,7 +954,8 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
       appendAuditEvent("CHILD_PROPOSALS_GENERATED", {
         parentRequirementId: node.id,
         parentTitle: node.title,
-        source: data.source || "mock",
+        source,
+        fallbackReason,
         nodeCount: normalized.nodes.length,
         edgeCount: normalized.edges.length,
       });
@@ -1131,6 +1155,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
           </button>
           {baselinePreview ? (
             <div>
+              {renderAiModeBadge(baselinePreview.source, baselinePreview.fallbackReason)}
               <p>
                 source={baselinePreview.source}, nodes={baselinePreview.nodes.length}, edges=
                 {baselinePreview.edges.length}
@@ -1250,6 +1275,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                         {rowState.error ? <p>{rowState.error}</p> : null}
                         {preview ? (
                           <div>
+                            {renderAiModeBadge(preview.source, preview.fallbackReason)}
                             <p>
                               source={preview.source}, nodeCount={preview.nodes.length}, edgeCount=
                               {preview.edges.length}
