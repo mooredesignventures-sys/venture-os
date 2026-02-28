@@ -60,6 +60,26 @@ function decisionStateBadge(state) {
   return "border-red-700/50 bg-red-900/35 text-red-200";
 }
 
+function renderAiModeBadge(source, fallbackReason) {
+  const isLive = source === "ai";
+  return (
+    <div className="mt-2 text-[11px]">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 ${
+          isLive
+            ? "border-emerald-600/70 bg-emerald-900/30 text-emerald-200"
+            : "border-amber-600/70 bg-amber-900/30 text-amber-100"
+        }`}
+      >
+        {isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}
+      </span>
+      {!isLive && fallbackReason === "missing_api_key" ? (
+        <div className="mt-1 text-amber-200">Set OPENAI_API_KEY to enable LIVE AI.</div>
+      ) : null}
+    </div>
+  );
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -275,6 +295,7 @@ export default function BrainstormClient() {
 
     return {
       source: draftResult.source || "mock",
+      fallbackReason: draftResult.fallbackReason || "",
       nodes,
       edges,
       titleById,
@@ -396,13 +417,21 @@ export default function BrainstormClient() {
         throw new Error(data?.error || "Failed to generate draft bundle.");
       }
 
-      setDraftResult(data);
+      const headerMode = response.headers.get("X-AI-Mode");
+      const source = headerMode === "ai" ? "ai" : (data.source || "mock");
+      const fallbackReason = typeof data?.fallbackReason === "string" ? data.fallbackReason : "";
+      setDraftResult({
+        ...data,
+        source,
+        fallbackReason,
+      });
       const nodeCount = Array.isArray(data.bundle.nodes) ? data.bundle.nodes.length : 0;
       const edgeCount = Array.isArray(data.bundle.edges) ? data.bundle.edges.length : 0;
       appendAuditEvent(eventType, {
         prompt,
         mode: "requirements",
-        source: data.source || "mock",
+        source,
+        fallbackReason,
         nodeCount,
         edgeCount,
         recruitedExpertCount: recruitedExperts.length,
@@ -1014,8 +1043,11 @@ export default function BrainstormClient() {
               {preview ? (
                 <div className="mt-4 space-y-3 text-xs">
                   <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2 text-slate-200">
-                    source={preview.source} • nodes={preview.nodes.length} • edges=
-                    {preview.edges.length}
+                    {renderAiModeBadge(preview.source, preview.fallbackReason)}
+                    <div className="mt-1">
+                      source={preview.source} • nodes={preview.nodes.length} • edges=
+                      {preview.edges.length}
+                    </div>
                   </div>
 
                   <div className="rounded-xl border border-red-900/25 bg-neutral-900 px-3 py-2">

@@ -26,6 +26,26 @@ const STEP_TITLES = {
   7: "Commit",
 };
 
+function renderAiModeBadge(source, fallbackReason) {
+  const isLive = source === "ai";
+  return (
+    <div className="text-[11px]">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 ${
+          isLive
+            ? "border-emerald-600/70 bg-emerald-900/30 text-emerald-200"
+            : "border-amber-600/70 bg-amber-900/30 text-amber-100"
+        }`}
+      >
+        {isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}
+      </span>
+      {!isLive && fallbackReason === "missing_api_key" ? (
+        <div className="mt-1 text-amber-200">Set OPENAI_API_KEY to enable LIVE AI.</div>
+      ) : null}
+    </div>
+  );
+}
+
 function loadStoredArray(key) {
   if (typeof window === "undefined") {
     return [];
@@ -807,7 +827,14 @@ export default function WizardClient() {
     if (!response.ok || !data?.ok || !data?.bundle) {
       throw new Error(data?.error || "Draft generation failed.");
     }
-    return data;
+    const headerMode = response.headers.get("X-AI-Mode");
+    const source = headerMode === "ai" ? "ai" : (data.source || "mock");
+    const fallbackReason = typeof data?.fallbackReason === "string" ? data.fallbackReason : "";
+    return {
+      ...data,
+      source,
+      fallbackReason,
+    };
   }
 
   async function handleRecruitExperts() {
@@ -1172,7 +1199,12 @@ export default function WizardClient() {
       persistRun(
         {
           ...run,
-          basicRequirementsPreview: { source: data.source || "mock", nodes, edges },
+          basicRequirementsPreview: {
+            source: data.source || "mock",
+            fallbackReason: data.fallbackReason || "",
+            nodes,
+            edges,
+          },
           acceptedRequirementIds: autoAccepted,
         },
         { step: 4, action: "BASIC_REQUIREMENTS_GENERATED", nodeCount: nodes.length },
@@ -1349,6 +1381,7 @@ export default function WizardClient() {
         ...(run.detailedRequirementPreviewsByParent || {}),
         [parent.id]: {
           source: data.source || "mock",
+          fallbackReason: data.fallbackReason || "",
           parentRequirementId: parent.id,
           parentTitle: parent.title,
           nodes: mappedNodes,
@@ -1487,6 +1520,7 @@ export default function WizardClient() {
         ...(run.projectPreviewsByParent || {}),
         [parent.id]: {
           source: data.source || "mock",
+          fallbackReason: data.fallbackReason || "",
           parentRequirementId: parent.id,
           parentTitle: parent.title,
           nodes: mappedNodes,
@@ -1909,6 +1943,10 @@ export default function WizardClient() {
                 <button type="button" onClick={handleGenerateBasicRequirements} disabled={basicLoading}>{basicLoading ? "Generating..." : "Generate Basic Requirements"}</button>
                 {run.basicRequirementsPreview?.nodes?.length ? (
                   <div className="mt-2 rounded-lg border border-slate-700/70 bg-neutral-900/40 p-2 text-sm text-slate-200">
+                    {renderAiModeBadge(
+                      run.basicRequirementsPreview.source || "mock",
+                      run.basicRequirementsPreview.fallbackReason || "",
+                    )}
                     <div className="text-xs text-slate-300">Accepted requirements: {acceptedRequirements.length}</div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button type="button" onClick={handleAcceptTopThreeRequirements}>
@@ -1978,6 +2016,7 @@ export default function WizardClient() {
                           </div>
                           {preview?.nodes?.length ? (
                             <div className="mt-2 text-xs text-slate-300">
+                              {renderAiModeBadge(preview.source || "mock", preview.fallbackReason || "")}
                               <div>previewNodes={preview.nodes.length}, previewEdges={(preview.edges || []).length}</div>
                               <ul className="mt-1 list-disc pl-5">
                                 {preview.nodes.slice(0, 5).map((node) => (
@@ -2024,6 +2063,7 @@ export default function WizardClient() {
                           </div>
                           {preview?.nodes?.length ? (
                             <div className="mt-2 text-xs text-slate-300">
+                              {renderAiModeBadge(preview.source || "mock", preview.fallbackReason || "")}
                               <div>previewNodes={preview.nodes.length}, previewEdges={(preview.edges || []).length}</div>
                               <ul className="mt-1 list-disc pl-5">
                                 {preview.nodes.slice(0, 5).map((node) => (

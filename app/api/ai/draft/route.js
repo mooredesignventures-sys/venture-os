@@ -435,6 +435,27 @@ function sanitizeAIBundle(bundle, mode, prompt, level = "detailed", nonce = "") 
   };
 }
 
+function withAiHeaders(payload, aiMode, fallbackReason = "", fallbackFromFailure = false) {
+  const headers = {
+    "X-AI-Mode": aiMode,
+  };
+  if (aiMode === "mock" && fallbackFromFailure && fallbackReason) {
+    headers["X-AI-Fallback-Reason"] = fallbackReason;
+  }
+  return NextResponse.json(payload, { headers });
+}
+
+function classifyFallbackReason(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/status\s+\d+/i.test(message)) {
+    return "openai_request_failed";
+  }
+  if (/json/i.test(message) || /content/i.test(message)) {
+    return "openai_response_invalid";
+  }
+  return "openai_runtime_error";
+}
+
 async function generateAIBundle(prompt, mode, level = "detailed") {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -488,12 +509,12 @@ async function generateAIBundle(prompt, mode, level = "detailed") {
     });
 
     if (!response.ok) {
-      return null;
+      throw new Error(`OpenAI request failed with status ${response.status}`);
     }
 
     const data = await response.json().catch(() => null);
     if (!data || typeof data !== "object") {
-      return null;
+      throw new Error("OpenAI response invalid");
     }
 
     const directBundle =
@@ -540,7 +561,7 @@ async function generateAIBundle(prompt, mode, level = "detailed") {
 
     const rawText = textChunks.join("\n").trim();
     if (!rawText) {
-      return null;
+      throw new Error("OpenAI response invalid");
     }
 
     const tryParse = (value) => {
@@ -564,12 +585,12 @@ async function generateAIBundle(prompt, mode, level = "detailed") {
     const jsonStart = rawText.indexOf("{");
     const jsonEnd = rawText.lastIndexOf("}");
     if (jsonStart === -1 || jsonEnd <= jsonStart) {
-      return null;
+      throw new Error("OpenAI response invalid");
     }
 
     const sliced = tryParse(rawText.slice(jsonStart, jsonEnd + 1));
     if (!sliced || typeof sliced !== "object") {
-      return null;
+      throw new Error("OpenAI response invalid");
     }
     if (sliced?.bundle && typeof sliced.bundle === "object") {
       return sliced.bundle;
@@ -577,9 +598,9 @@ async function generateAIBundle(prompt, mode, level = "detailed") {
     if (Array.isArray(sliced?.nodes) || Array.isArray(sliced?.edges)) {
       return sliced;
     }
-    return null;
-  } catch {
-    return null;
+    throw new Error("OpenAI response invalid");
+  } catch (error) {
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -608,33 +629,65 @@ export async function POST(request) {
   const level = normalizeLevel(body?.level);
   const nonce = normalizeNonce(body?.nonce);
 
+  if (process.env.VOS_FORCE_MOCK === "true") {
+    return withAiHeaders(
+      {
+        ok: true,
+        source: "mock",
+        fallbackReason: "forced_mock",
+        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+      },
+      "mock",
+    );
+  }
+
   if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({
-      ok: true,
-      source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-    });
+    return withAiHeaders(
+      {
+        ok: true,
+        source: "mock",
+        fallbackReason: "missing_api_key",
+        bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+      },
+      "mock",
+    );
   }
 
   try {
     const aiBundle = await generateAIBundle(prompt, mode, level);
     if (!aiBundle) {
-      return NextResponse.json({
+      return withAiHeaders(
+        {
+          ok: true,
+          source: "mock",
+          fallbackReason: "openai_response_invalid",
+          bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
+        },
+        "mock",
+        "openai_response_invalid",
+        true,
+      );
+    }
+    return withAiHeaders(
+      {
+        ok: true,
+        source: "ai",
+        bundle: sanitizeAIBundle(aiBundle, mode, prompt, level, nonce),
+      },
+      "ai",
+    );
+  } catch (error) {
+    const fallbackReason = classifyFallbackReason(error);
+    return withAiHeaders(
+      {
         ok: true,
         source: "mock",
+        fallbackReason,
         bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-      });
-    }
-    return NextResponse.json({
-      ok: true,
-      source: "ai",
-      bundle: sanitizeAIBundle(aiBundle, mode, prompt, level, nonce),
-    });
-  } catch {
-    return NextResponse.json({
-      ok: true,
-      source: "mock",
-      bundle: getDeterministicMockBundle(mode, prompt, level, nonce),
-    });
+      },
+      "mock",
+      fallbackReason,
+      true,
+    );
   }
 }
