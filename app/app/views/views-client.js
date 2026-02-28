@@ -1,9 +1,11 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import AiPanel from "../../../src/components/ai-panel";
 import EmptyState from "../../../src/components/ui/empty-state";
 import SearchBox from "../../../src/components/ui/search-box";
 import SelectFilter from "../../../src/components/ui/select-filter";
+import { AiModeBadge, StageBadge } from "../../../src/components/ui/status-badges";
 
 const STORAGE_KEY = "draft_nodes";
 const EDGE_STORAGE_KEY = "draft_edges";
@@ -19,30 +21,6 @@ const COMMIT_CONFIRM_TEXT = "CONFIRMED";
 const RELATIONSHIP_TYPES = ["depends_on", "enables", "relates_to"];
 const RISK_LEVELS = ["low", "medium", "high"];
 const EDITABLE_STATUSES = ["queued", "in_progress", "review", "complete"];
-
-function renderAiModeBadge(source, fallbackReason) {
-  const isLive = source === "ai";
-  return (
-    <div className="text-xs">
-      <span className="status-badge">
-        {isLive ? "AI: LIVE" : "AI: FALLBACK (mock)"}
-      </span>
-      {!isLive && fallbackReason === "missing_api_key" ? (
-        <div>Set OPENAI_API_KEY to enable LIVE AI.</div>
-      ) : null}
-    </div>
-  );
-}
-
-function renderLifecycleBadge(stage) {
-  const normalized = typeof stage === "string" ? stage.toLowerCase() : "proposed";
-  const isCommitted = normalized === "committed";
-  return (
-    <span className={`status-badge${isCommitted ? " status-badge--committed" : ""}`}>
-      {isCommitted ? "COMMITTED" : "PROPOSED"}
-    </span>
-  );
-}
 
 function normalizeRelationships(node) {
   if (Array.isArray(node.relationships)) {
@@ -1366,73 +1344,58 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
 
     return (
       <section>
-        <div>
-          <h3>Requirements AI Chat (Proposed-only)</h3>
-          <div>
-            {requirementsChatMessages.map((entry) => (
-              <p key={entry.id}>
-                <strong>{entry.role === "founder" ? "Founder" : "AI"}:</strong> {entry.text}
-              </p>
-            ))}
-            {requirementsAiLoading ? <p>AI is drafting requirements...</p> : null}
-          </div>
-          <p>
-            <input
-              value={requirementsChatInput}
-              onChange={(event) => setRequirementsChatInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void handleSendRequirementsAi();
-                }
-              }}
-              placeholder="Create 5 requirements for X"
-            />{" "}
-            <button
-              type="button"
-              onClick={() => void handleSendRequirementsAi()}
-              disabled={requirementsAiLoading || !requirementsChatInput.trim()}
-            >
-              Send
-            </button>{" "}
-            <button
-              type="button"
-              onClick={handleApplyRequirementsAi}
-              disabled={!requirementsAiPreview}
-            >
-              Apply
-            </button>
-          </p>
-          {requirementsAiError ? <p>{requirementsAiError}</p> : null}
-          {requirementsAiApplyResult ? <p>{requirementsAiApplyResult}</p> : null}
-          {requirementsAiPreview ? (
-            <div>
-              {renderAiModeBadge(requirementsAiPreview.source, requirementsAiPreview.fallbackReason)}
-              <p>
-                source={requirementsAiPreview.source}, nodes={requirementsAiPreview.nodes.length},
-                edges={requirementsAiPreview.edges.length}
-              </p>
-              <ul>
-                {requirementsAiPreview.nodes.map((node) => (
-                  <li key={node.id}>
-                    {renderLifecycleBadge(node.stage || "proposed")} [{node.type}] {node.title}
-                  </li>
-                ))}
-              </ul>
-              <ul>
-                {requirementsAiPreview.edges.map((edge) => {
-                  const fromLabel = requirementsAiPreview.titleById.get(edge.from) || edge.from;
-                  const toLabel = requirementsAiPreview.titleById.get(edge.to) || edge.to;
-                  return (
-                    <li key={edge.id}>
-                      {edge.relationshipType}: {fromLabel} -&gt; {toLabel}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : null}
-        </div>
+        <AiPanel
+          title="Requirements AI Chat (Proposed-only)"
+          subtitle="Send a requirement goal, review proposed output, then Apply to draft requirements."
+          messages={requirementsChatMessages}
+          inputValue={requirementsChatInput}
+          inputPlaceholder="Create 5 requirements for X"
+          onInputChange={setRequirementsChatInput}
+          onSend={() => {
+            void handleSendRequirementsAi();
+          }}
+          onApply={handleApplyRequirementsAi}
+          canSend={Boolean(requirementsChatInput.trim())}
+          canApply={Boolean(requirementsAiPreview)}
+          loading={requirementsAiLoading}
+          errorMessage={requirementsAiError}
+          resultMessage={requirementsAiApplyResult}
+          source={requirementsAiPreview?.source || ""}
+          fallbackReason={requirementsAiPreview?.fallbackReason || ""}
+          lastProposalSummary={
+            requirementsAiPreview
+              ? `source=${requirementsAiPreview.source}, nodes=${requirementsAiPreview.nodes.length}, edges=${requirementsAiPreview.edges.length}`
+              : ""
+          }
+          emptyTitle="Requirements graph is empty"
+          emptyMessage="Generate requirements."
+          renderPreview={
+            requirementsAiPreview
+              ? () => (
+                  <div>
+                    <ul>
+                      {requirementsAiPreview.nodes.map((node) => (
+                        <li key={node.id}>
+                          <StageBadge stage={node.stage || "proposed"} /> [{node.type}] {node.title}
+                        </li>
+                      ))}
+                    </ul>
+                    <ul>
+                      {requirementsAiPreview.edges.map((edge) => {
+                        const fromLabel = requirementsAiPreview.titleById.get(edge.from) || edge.from;
+                        const toLabel = requirementsAiPreview.titleById.get(edge.to) || edge.to;
+                        return (
+                          <li key={edge.id}>
+                            {edge.relationshipType}: {fromLabel} -&gt; {toLabel}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )
+              : null
+          }
+        />
         <div>
           <h3>Latest Baseline Concept</h3>
           {latestBaseline ? (
@@ -1460,7 +1423,11 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
           </button>
           {baselinePreview ? (
             <div>
-              {renderAiModeBadge(baselinePreview.source, baselinePreview.fallbackReason)}
+              <AiModeBadge
+                source={baselinePreview.source}
+                fallbackReason={baselinePreview.fallbackReason}
+                className="text-xs"
+              />
               <p>
                 source={baselinePreview.source}, nodes={baselinePreview.nodes.length}, edges=
                 {baselinePreview.edges.length}
@@ -1498,7 +1465,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
             title={`No ${showingProposed ? "proposed" : "committed"} requirements found.`}
             message={
               showingProposed
-                ? "Ask AI to generate requirements."
+                ? "Generate requirements."
                 : "Commit proposed requirements to populate the committed list."
             }
           />
@@ -1523,7 +1490,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                   <Fragment key={node.id}>
                     <tr>
                       <td>
-                        {renderLifecycleBadge(node.stage || "proposed")}{" "}
+                        <StageBadge stage={node.stage || "proposed"} />{" "}
                         <input
                           value={getRowValue(node, "title")}
                           disabled={!editable}
@@ -1581,7 +1548,11 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                         {rowState.error ? <p>{rowState.error}</p> : null}
                         {preview ? (
                           <div>
-                            {renderAiModeBadge(preview.source, preview.fallbackReason)}
+                            <AiModeBadge
+                              source={preview.source}
+                              fallbackReason={preview.fallbackReason}
+                              className="text-xs"
+                            />
                             <p>
                               source={preview.source}, nodeCount={preview.nodes.length}, edgeCount=
                               {preview.edges.length}
@@ -1589,7 +1560,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
                             <ul>
                               {preview.nodes.map((child) => (
                                 <li key={child.id}>
-                                  {renderLifecycleBadge(child.stage || "proposed")} [{child.type}] {child.title}
+                                  <StageBadge stage={child.stage || "proposed"} /> [{child.type}] {child.title}
                                 </li>
                               ))}
                             </ul>
@@ -1636,7 +1607,7 @@ export default function ViewsClient({ mode, viewScope = "draft" }) {
               {visibleRequirementNodes.map((node) => (
                 <tr key={node.id}>
                   <td>
-                    {renderLifecycleBadge(node.stage || "committed")} {node.title}
+                    <StageBadge stage={node.stage || "committed"} /> {node.title}
                   </td>
                   <td>{node.risk || "medium"}</td>
                   <td>{node.status || "queued"}</td>

@@ -11,6 +11,9 @@ export default function AppShell({ title, description, children, grid = false, h
             {description ? <p className="vo-meta app-shell__subtitle">{description}</p> : null}
           </header>
         )}
+        <section className="app-shell__draft-banner" aria-label="Draft mode explanation">
+          AI proposes to Draft; Apply adds to Draft; Founder commits with CONFIRMED.
+        </section>
         <div className="app-shell__content">{children}</div>
       </div>
     </main>

@@ -45,7 +45,7 @@ export default async function BrainstormPage() {
             <Link href="/app/views/requirements">Requirements workspace</Link>
           </p>
           <p>
-            <Link href="/app/council">Council (coming soon)</Link>
+            <Link href="/app/council">Council</Link>
           </p>
         </Card>
       </section>
