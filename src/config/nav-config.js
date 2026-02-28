@@ -1,5 +1,12 @@
 export const NAV_CONFIG = Object.freeze([
   {
+    id: "council",
+    href: "/app/council",
+    label: "Council",
+    visible: true,
+    enabled: true,
+  },
+  {
     id: "brainstorm",
     href: "/app/brainstorm",
     label: "Brainstorm",
@@ -12,14 +19,6 @@ export const NAV_CONFIG = Object.freeze([
     label: "Requirements",
     visible: true,
     enabled: true,
-  },
-  {
-    id: "council",
-    href: "/app/council",
-    label: "Council",
-    visible: true,
-    enabled: false,
-    disabledLabel: "Coming soon",
   },
   {
     id: "nodes",
