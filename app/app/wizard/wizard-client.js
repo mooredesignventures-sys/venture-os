@@ -336,6 +336,7 @@ function createRun() {
     projectPreview: null,
     lastSaved: { nodeIds: [], edgeIds: [] },
     lastSavedStep: null,
+    lastSavedAt: null,
     lastSavedStorage: "draft",
     savedAt: null,
     graphSaveStatus: {},
@@ -361,17 +362,19 @@ function withHistory(run, patch) {
 }
 
 function resolveMiniMapData(status, run) {
-  const fallback = run?.lastSavedStep === status?.step ? run.lastSaved : null;
-  const sourceLastSaved =
-    status?.lastSaved && Array.isArray(status.lastSaved.nodeIds)
-      ? status.lastSaved
-      : fallback;
-
-  if (!sourceLastSaved || !Array.isArray(sourceLastSaved.nodeIds)) {
+  if (!run || run.lastSavedStep !== status?.step) {
     return { nodes: [], edges: [], highlightIds: [] };
   }
 
-  const storage = status?.storage || run?.lastSavedStorage || "draft";
+  const sourceLastSaved = run.lastSaved;
+  const sourceNodeIds = Array.isArray(sourceLastSaved?.nodeIds) ? sourceLastSaved.nodeIds : [];
+  const sourceEdgeIds = Array.isArray(sourceLastSaved?.edgeIds) ? sourceLastSaved.edgeIds : [];
+
+  if (!sourceNodeIds.length && !sourceEdgeIds.length) {
+    return { nodes: [], edges: [], highlightIds: [] };
+  }
+
+  const storage = run.lastSavedStorage || status?.storage || "draft";
   const { nodeKey, edgeKey } = graphKeys(storage);
   const allNodes = loadStoredArray(nodeKey);
   const allEdges = loadStoredArray(edgeKey);
@@ -381,11 +384,9 @@ function resolveMiniMapData(status, run) {
       .map((node) => [node.id, node]),
   );
 
-  const highlightIds = [...sourceLastSaved.nodeIds];
+  const highlightIds = [...sourceNodeIds];
   const selectedNodeIds = new Set(highlightIds);
-  const selectedEdgeIds = new Set(
-    Array.isArray(sourceLastSaved.edgeIds) ? sourceLastSaved.edgeIds : [],
-  );
+  const selectedEdgeIds = new Set(sourceEdgeIds);
 
   for (const nodeId of highlightIds) {
     const node = nodeById.get(nodeId);
@@ -407,6 +408,7 @@ function resolveMiniMapData(status, run) {
   });
 
   const nodes = [...selectedNodeIds]
+    .sort()
     .map((id) => nodeById.get(id))
     .filter(Boolean);
 
@@ -420,7 +422,7 @@ function MiniMapReadOnly({ run, status }) {
   if (!nodes.length) {
     return (
       <div className="rounded-lg border border-slate-700/70 bg-neutral-900/50 p-2 text-xs text-slate-400">
-        No saved graph output for this step yet. Save to Graph to preview.
+        Save to Graph to preview.
       </div>
     );
   }
@@ -438,8 +440,8 @@ function MiniMapReadOnly({ run, status }) {
   nodes.forEach((node, index) => {
     const col = index % cols;
     const row = Math.floor(index / cols);
-    const x = padX + col * xStep;
-    const y = padY + row * yStep;
+    const x = cols > 1 ? padX + col * xStep : width / 2;
+    const y = rows > 1 ? padY + row * yStep : height / 2;
     posById.set(node.id, { x, y });
   });
 
@@ -473,19 +475,17 @@ function MiniMapReadOnly({ run, status }) {
           const highlighted = highlightSet.has(node.id);
           return (
             <g key={`${node.id}-${index}`}>
-              <rect
-                x={pos.x - 42}
-                y={pos.y - 16}
-                width="84"
-                height="32"
-                rx="8"
+              <circle
+                cx={pos.x}
+                cy={pos.y}
+                r="14"
                 fill={highlighted ? "rgba(239, 68, 68, 0.25)" : "rgba(30, 41, 59, 0.9)"}
                 stroke={highlighted ? "rgba(251, 191, 36, 0.95)" : "rgba(148, 163, 184, 0.65)"}
                 strokeWidth={highlighted ? "2.4" : "1.2"}
               />
               <text
                 x={pos.x}
-                y={pos.y}
+                y={pos.y + 24}
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill="#e2e8f0"
@@ -516,6 +516,7 @@ export default function WizardClient() {
   const [confirmText, setConfirmText] = useState("");
   const [questionIndex, setQuestionIndex] = useState(0);
   const [answerInput, setAnswerInput] = useState("");
+  const [openMiniMapStep, setOpenMiniMapStep] = useState(null);
 
   function persistRun(nextRun, historyPatch) {
     if (!nextRun) {
@@ -540,7 +541,7 @@ export default function WizardClient() {
     if (!run) {
       return;
     }
-    const savedAt = nowIso();
+    const lastSavedAt = nowIso();
     const lastSaved = {
       nodeIds: Array.isArray(status?.lastSaved?.nodeIds) ? status.lastSaved.nodeIds : [],
       edgeIds: Array.isArray(status?.lastSaved?.edgeIds) ? status.lastSaved.edgeIds : [],
@@ -557,7 +558,8 @@ export default function WizardClient() {
       ...(run.graphSaveStatus || {}),
       [step]: {
         saved: true,
-        savedAt,
+        savedAt: lastSavedAt,
+        lastSavedAt,
         step,
         lastSaved,
         lastSavedCounts,
@@ -571,15 +573,17 @@ export default function WizardClient() {
       graphSaveStatus,
       lastSaved,
       lastSavedStep: step,
+      lastSavedAt,
       lastSavedStorage: status?.storage || "draft",
-      savedAt,
+      savedAt: lastSavedAt,
     };
     persistRun(next, { step, action: auditType });
     appendAuditEvent(auditType, {
       wizardRunId: run.id,
       ...status,
       lastSavedCounts,
-      savedAt,
+      lastSavedAt,
+      savedAt: lastSavedAt,
     });
     setNotice(`Saved for Step ${step}: ${STEP_TITLES[step]}`);
     setError("");
@@ -589,7 +593,32 @@ export default function WizardClient() {
     const runs = loadStoredArray(WIZARD_RUNS_STORAGE_KEY);
     const active = [...runs].reverse().find((item) => item?.stage === "in_progress");
     if (active) {
-      return active;
+      const normalized = {
+        ...active,
+        lastSaved:
+          active?.lastSaved && Array.isArray(active.lastSaved.nodeIds) && Array.isArray(active.lastSaved.edgeIds)
+            ? active.lastSaved
+            : { nodeIds: [], edgeIds: [] },
+        lastSavedStep: typeof active?.lastSavedStep === "number" ? active.lastSavedStep : null,
+        lastSavedAt:
+          typeof active?.lastSavedAt === "string"
+            ? active.lastSavedAt
+            : typeof active?.savedAt === "string"
+              ? active.savedAt
+              : null,
+      };
+      if (
+        normalized.lastSaved !== active.lastSaved ||
+        normalized.lastSavedStep !== active.lastSavedStep ||
+        normalized.lastSavedAt !== active.lastSavedAt
+      ) {
+        const idx = runs.findIndex((item) => item?.id === active.id);
+        if (idx >= 0) {
+          const nextRuns = runs.map((item, index) => (index === idx ? normalized : item));
+          writeStoredArray(WIZARD_RUNS_STORAGE_KEY, nextRuns);
+        }
+      }
+      return normalized;
     }
     const created = createRun();
     writeStoredArray(WIZARD_RUNS_STORAGE_KEY, [...runs, created]);
@@ -631,6 +660,13 @@ export default function WizardClient() {
     const existing = (run.answers || []).find((item) => item.questionId === question?.questionId);
     setAnswerInput(existing?.answer || "");
   }, [run, questionIndex]);
+
+  useEffect(() => {
+    if (!run || typeof run.lastSavedStep !== "number") {
+      return;
+    }
+    setOpenMiniMapStep(run.lastSavedStep);
+  }, [run?.lastSavedStep, run?.lastSavedAt]);
 
   const canProceed = useMemo(() => {
     if (!run) {
@@ -704,24 +740,14 @@ export default function WizardClient() {
     const additions = run.experts.filter((expert) => !existingIds.has(expert.id));
     const nextExperts = [...existing, ...additions];
     writeStoredArray(RECRUITED_EXPERTS_STORAGE_KEY, nextExperts);
+    const merged = mergeGraph("draft", additions, []);
 
     setStepSaved(1, {
+      ...merged,
       storage: "draft",
-      addedNodes: additions.length,
-      addedEdges: 0,
-      totalNodes: nextExperts.length,
-      totalEdges: 0,
       expertsSavedCount: additions.length,
       totalExperts: nextExperts.length,
       sampleTitles: additions.slice(0, 5).map((item) => item.title),
-      lastSaved: {
-        nodeIds: additions.map((item) => item.id),
-        edgeIds: [],
-      },
-      lastSavedCounts: {
-        nodes: additions.length,
-        edges: 0,
-      },
     }, "WIZARD_EXPERTS_SAVED");
   }
 
@@ -1318,8 +1344,9 @@ export default function WizardClient() {
             : "border-amber-800/60 bg-amber-950/25 text-amber-100"
         }`}
       >
-        <div>Saved to Graph: {isSaved ? "Saved ✓" : "pending"}</div>
+        <div>Saved to Graph: {isSaved ? "Saved \u2713" : "pending"}</div>
         <div>storage={status?.storage || (step === 7 ? "committed" : "draft")}</div>
+        <div>lastSavedAt={status?.lastSavedAt || run.lastSavedAt || "-"}</div>
         <div>
           addedNodes={status?.addedNodes ?? 0}, addedEdges={status?.addedEdges ?? 0}, totalNodes=
           {status?.totalNodes ?? 0}, totalEdges={status?.totalEdges ?? 0}
@@ -1341,14 +1368,18 @@ export default function WizardClient() {
           </ul>
         ) : null}
 
-        {step >= 2 ? (
-          <details className="mt-2">
-            <summary className="cursor-pointer text-slate-100">Mini Map (read-only)</summary>
-            <div className="mt-2">
-              <MiniMapReadOnly run={run} status={statusWithStep} />
-            </div>
-          </details>
-        ) : null}
+        <details
+          className="mt-2"
+          open={openMiniMapStep === step}
+          onToggle={(event) => {
+            setOpenMiniMapStep(event.currentTarget.open ? step : null);
+          }}
+        >
+          <summary className="cursor-pointer text-slate-100">Mini Map (read-only)</summary>
+          <div className="mt-2">
+            <MiniMapReadOnly run={run} status={statusWithStep} />
+          </div>
+        </details>
       </div>
     );
   }
@@ -1529,3 +1560,4 @@ export default function WizardClient() {
     </>
   );
 }
+
